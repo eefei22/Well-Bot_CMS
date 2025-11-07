@@ -1,0 +1,3 @@
+should add some rules for the persona structure
+add word limit also?
+trigger request

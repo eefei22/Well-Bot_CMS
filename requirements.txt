@@ -1,0 +1,25 @@
+# py -3.12 -m venv venv
+#.\venv\Scripts\Activate.ps1
+# pip install -r requirements.txt
+
+# FastAPI and server
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+
+# Supabase client (REST API)
+supabase>=2.4.0
+# Pin httpx to compatible version:
+# - gotrue requires <0.28
+# - supabase-auth and supabase-functions require >=0.26
+httpx[http2]>=0.26,<0.28
+
+# Data validation and settings
+pydantic==2.5.3
+pydantic-settings==2.1.0
+
+# Environment variables
+python-dotenv==1.0.0
+
+# Testing
+requests==2.31.0
+
