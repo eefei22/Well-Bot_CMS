@@ -1,0 +1,16 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+output/
+.git/
+.gitignore
+.env
+.env.local
+*.md
+notes.txt
+archive/
+WORKFLOW_SUMMARY.md
+

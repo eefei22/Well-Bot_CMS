@@ -16,8 +16,9 @@ from llm import DeepSeekClient
 # Load environment variables from .env file
 load_dotenv()
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Setup logging (only if not already configured)
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -84,7 +85,7 @@ def process_user_context(user_id: str) -> str:
     1. Loads all user messages from the database
     2. Filters and normalizes messages
     3. Uses DeepSeek reasoning model to extract daily life stories and experiences
-    4. Saves the context summary to user_context_bundle table (persona_summary field)
+    4. Saves the context summary to users_context_bundle table (persona_summary field)
     
     Args:
         user_id: UUID of the user
@@ -131,19 +132,29 @@ def process_user_context(user_id: str) -> str:
     messages_text = "\n".join([f"- {msg}" for msg in normalized_messages])
     
     # Create prompt for daily life context extraction
-    prompt = f"""Analyze the following user messages and extract their daily life stories, experiences, and contextual information.
-Focus on extracting:
-- Daily routines and activities
-- Stories and experiences they share
-- People they meet and relationships
-- Work life and professional context
-- Life events and significant moments
-- Their day-to-day activities and interactions
+    prompt = f"""You are an intelligent context-extraction assistant.  
+            Analyze the following user messages and extract the key daily-life context, background and experiential stories of the user.
 
-User Messages:
-{messages_text}
+            Focus on extracting:  
+            - Daily routines and activities  
+            - Stories and experiences the user shares  
+            - People they meet and their relationships  
+            - Work life and professional context  
+            - Life events and significant moments  
+            - Day-to-day activities and interactions  
 
-Please provide a structured, detailed summary of the user's daily life context based on these messages. Use bullet points to organize the information. Do not include any additional justification or explanation, just the context summary."""
+            User Messages:  
+            {messages_text}
+
+            Please output a **structured**, **detailed** summary of the user’s daily-life context in **clearly-labelled bullet points** grouped by category.  
+            Constraints:  
+            • Only include items supported by the messages; avoid speculation.  
+            • Use relative timestamps if available (e.g., “recently”, “over past month”).  
+            • Do **not** include extra commentary or reflection or labelling — just the summary.
+
+            Output only the summary.
+
+            """
 
     # Initialize LLM client with longer timeout for reasoning model
     logger.info("Initializing DeepSeek client (reasoning model may take 1-3 minutes)")
@@ -166,7 +177,7 @@ Please provide a structured, detailed summary of the user's daily life context b
     
     # Save context summary to database (stored in persona_summary field)
     logger.info("Saving context summary to database")
-    success = database.write_user_context_bundle(user_id, persona_summary=context_summary)
+    success = database.write_users_context_bundle(user_id, persona_summary=context_summary)
     
     if not success:
         logger.warning(f"Failed to save context summary to database for user {user_id}")

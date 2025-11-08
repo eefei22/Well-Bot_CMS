@@ -14,8 +14,9 @@ import logging
 # Load environment variables from .env file
 load_dotenv()
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Setup logging (only if not already configured)
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -137,9 +138,9 @@ def load_user_messages(user_id: str) -> List[Dict]:
     return result
 
 
-def write_user_context_bundle(user_id: str, persona_summary: str = None, facts: str = None) -> bool:
+def write_users_context_bundle(user_id: str, persona_summary: str = None, facts: str = None) -> bool:
     """
-    Write or update a user context bundle in the user_context_bundle table.
+    Write or update a user context bundle in the users_context_bundle table.
     This uses upsert (insert or update) since user_id is the primary key.
     Supports partial updates - can update one or both fields.
     
@@ -164,7 +165,7 @@ def write_user_context_bundle(user_id: str, persona_summary: str = None, facts: 
             payload["facts"] = facts
         
         # Use upsert to insert or update (since user_id is primary key)
-        response = client.table("user_context_bundle")\
+        response = client.table("users_context_bundle")\
             .upsert(payload, on_conflict="user_id")\
             .execute()
         

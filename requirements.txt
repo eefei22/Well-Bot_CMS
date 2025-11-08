@@ -14,7 +14,7 @@ supabase>=2.4.0
 httpx[http2]>=0.26,<0.28
 
 # Data validation and settings
-pydantic==2.5.3
+pydantic>=2.10.0
 pydantic-settings==2.1.0
 
 # Environment variables

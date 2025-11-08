@@ -54,4 +54,6 @@ htmlcov/
 # Project specific
 *.db
 *.sqlite
-
+.References/
+archive/
+output/

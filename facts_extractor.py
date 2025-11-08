@@ -16,8 +16,9 @@ from llm import DeepSeekClient
 # Load environment variables from .env file
 load_dotenv()
 
-# Setup logging
-logging.basicConfig(level=logging.INFO)
+# Setup logging (only if not already configured)
+if not logging.getLogger().handlers:
+    logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -84,7 +85,7 @@ def extract_user_facts(user_id: str) -> str:
     1. Loads all user messages from the database
     2. Filters and normalizes messages
     3. Uses DeepSeek reasoning model to extract persona characteristics
-    4. Saves the facts to user_context_bundle table (facts field)
+    4. Saves the facts to users_context_bundle table (facts field)
     
     Args:
         user_id: UUID of the user
@@ -131,19 +132,27 @@ def extract_user_facts(user_id: str) -> str:
     messages_text = "\n".join([f"- {msg}" for msg in normalized_messages])
     
     # Create prompt for persona facts extraction
-    prompt = f"""Analyze the following user messages and extract their persona characteristics and facts.
-Focus on categorizing:
-- Communication style and patterns
-- Interests and preferences
-- Personality traits
-- Values and concerns
-- Notable characteristics
-- Behavioral patterns
+    prompt = f"""You are an intelligent user-profiling assistant.  
+            Analyze the following user messages and extract their stable persona characteristics and factual context.
 
-User Messages:
-{messages_text}
+            Focus on these categories:  
+            - Communication style and patterns  
+            - Interests and preferences  
+            - Personality traits  
+            - Values and concerns  
+            - Notable characteristics  
+            - Behavioural patterns  
 
-Please provide a structured, detailed summary of the user's persona facts based on these messages. Use bullet points to organize the information by category. Do not include any additional justification or explanation, just the persona facts summary."""
+            User Messages:  
+            {messages_text}
+
+            Please output a **structured**, **detailed** summary of the user’s facts in clearly-labelled bullet points by category.  
+            Important constraints:  
+            • Only include items you can reasonably infer.  
+            • Do **not** include additional justification or long explanations.  
+
+            Output only the summary.
+            """
 
     # Initialize LLM client with longer timeout for reasoning model
     logger.info("Initializing DeepSeek client (reasoning model may take 1-3 minutes)")
@@ -166,7 +175,7 @@ Please provide a structured, detailed summary of the user's persona facts based 
     
     # Save facts to database
     logger.info("Saving persona facts to database")
-    success = database.write_user_context_bundle(user_id, facts=facts_summary)
+    success = database.write_users_context_bundle(user_id, facts=facts_summary)
     
     if not success:
         logger.warning(f"Failed to save persona facts to database for user {user_id}")
