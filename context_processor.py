@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 def _filter_messages(messages: List[str], min_words: int = 4) -> List[str]:
     """
     Filter messages to keep only those with at least min_words words.
+    For Chinese/CJK text, counts characters instead of words.
     
     Args:
         messages: List of message texts
@@ -33,13 +34,36 @@ def _filter_messages(messages: List[str], min_words: int = 4) -> List[str]:
     Returns:
         Filtered list of messages
     """
+    def _has_cjk_characters(text: str) -> bool:
+        """Check if text contains Chinese, Japanese, or Korean characters."""
+        for char in text:
+            if '\u4e00' <= char <= '\u9fff':  # Chinese
+                return True
+            if '\u3040' <= char <= '\u309f':  # Hiragana
+                return True
+            if '\u30a0' <= char <= '\u30ff':  # Katakana
+                return True
+            if '\uac00' <= char <= '\ud7a3':  # Korean
+                return True
+        return False
+    
     filtered = []
     for msg in messages:
-        word_count = len(msg.split())
-        if word_count >= min_words:
-            filtered.append(msg)
+        # For Chinese/CJK text, count characters instead of words
+        if _has_cjk_characters(msg):
+            # Count non-whitespace characters for CJK languages
+            char_count = len([c for c in msg if not c.isspace()])
+            if char_count >= min_words:
+                filtered.append(msg)
+            else:
+                logger.debug(f"Filtered out short CJK message: {msg[:50]}... (chars: {char_count})")
         else:
-            logger.debug(f"Filtered out short message: {msg[:50]}... (words: {word_count})")
+            # For languages with spaces, count words
+            word_count = len(msg.split())
+            if word_count >= min_words:
+                filtered.append(msg)
+            else:
+                logger.debug(f"Filtered out short message: {msg[:50]}... (words: {word_count})")
     return filtered
 
 
@@ -148,6 +172,7 @@ def process_user_context(user_id: str) -> str:
 
             Please output a **structured**, **detailed** summary of the user’s daily-life context in **clearly-labelled bullet points** grouped by category.  
             Constraints:  
+            • Produce the summary in the same language as the user messages.
             • Only include items supported by the messages; avoid speculation.  
             • Use relative timestamps if available (e.g., “recently”, “over past month”).  
             • Do **not** include extra commentary or reflection or labelling — just the summary.
