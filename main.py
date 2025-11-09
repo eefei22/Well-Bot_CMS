@@ -12,6 +12,7 @@ from datetime import datetime
 # Import modules
 from utils import database, schemas
 from context_generator import context_processor, facts_extractor
+from intervention import intervention
 
 # Setup logging with timestamps
 logging.basicConfig(
@@ -114,6 +115,82 @@ async def process_user_context(request: schemas.ProcessContextRequest):
         total_duration = (end_time - start_time).total_seconds()
         logger.error(f"POST /api/context/process - Exception at {end_time.strftime('%H:%M:%S')} after {total_duration:.2f}s: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.post("/api/intervention/suggest", response_model=schemas.SuggestionResponse)
+async def suggest_intervention(request: schemas.SuggestionRequest):
+    """
+    Suggest intervention activities based on emotion and user history.
+    
+    This endpoint:
+    1. Fetches recent emotion logs and activity history for the user
+    2. Determines if an intervention should be triggered (kick-start decision)
+    3. Generates ranked activity suggestions (1-5) with scores
+    4. Returns both the decision and suggestions
+    
+    Args:
+        request: SuggestionRequest containing user_id, emotion_label, confidence_score, timestamp
+    
+    Returns:
+        SuggestionResponse with decision (trigger_intervention, confidence) and 
+        suggestion (ranked activities with scores and reasoning)
+    """
+    start_time = datetime.now()
+    logger.info(f"POST /api/intervention/suggest - Endpoint called at {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"  User ID: {request.user_id}, Emotion: {request.emotion_label}, Confidence: {request.confidence_score}")
+    
+    try:
+        response = intervention.process_suggestion_request(request)
+        
+        end_time = datetime.now()
+        total_duration = (end_time - start_time).total_seconds()
+        logger.info(f"POST /api/intervention/suggest - Completed at {end_time.strftime('%Y-%m-%d %H:%M:%S')} (total: {total_duration:.2f}s)")
+        logger.info(f"  Decision: trigger={response.decision.trigger_intervention}, confidence={response.decision.confidence_score:.2f}")
+        
+        return response
+    except ValueError as e:
+        end_time = datetime.now()
+        total_duration = (end_time - start_time).total_seconds()
+        logger.error(f"POST /api/intervention/suggest - ValueError at {end_time.strftime('%H:%M:%S')} after {total_duration:.2f}s: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        end_time = datetime.now()
+        total_duration = (end_time - start_time).total_seconds()
+        logger.error(f"POST /api/intervention/suggest - Exception at {end_time.strftime('%H:%M:%S')} after {total_duration:.2f}s: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@app.get("/api/intervention/health")
+async def intervention_health():
+    """
+    Health check endpoint for intervention service.
+    
+    Returns:
+        Health status with service availability and database connectivity
+    """
+    try:
+        # Test database connectivity
+        from utils import database
+        client = database.get_supabase_client()
+        
+        # Simple query to test connection
+        test_response = client.table("users").select("id").limit(1).execute()
+        
+        return {
+            "status": "healthy",
+            "service": "intervention",
+            "database": "connected",
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return {
+            "status": "unhealthy",
+            "service": "intervention",
+            "database": "disconnected",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
 
 
 if __name__ == "__main__":
