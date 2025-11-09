@@ -7,6 +7,12 @@ This script defines request/response models for the API.
 from pydantic import BaseModel
 from typing import Optional
 
+# Re-export intervention models for API use
+from intervention.models import (
+    SuggestionRequest,
+    SuggestionResponse
+)
+
 
 class ProcessContextRequest(BaseModel):
     """Request model for processing user context."""

@@ -178,3 +178,178 @@ def write_users_context_bundle(user_id: str, persona_summary: str = None, facts:
     except Exception as e:
         logger.error(f"Failed to write context bundle for user {user_id}: {e}")
         return False
+
+
+def fetch_recent_emotion_logs(user_id: str, hours: int = 48) -> List[Dict]:
+    """
+    Fetch recent emotion logs for a user from the emotional_log table.
+    
+    Args:
+        user_id: UUID of the user
+        hours: Number of hours to look back (default: 48)
+    
+    Returns:
+        List of emotion log dictionaries, each containing:
+        - id: integer
+        - user_id: uuid
+        - timestamp: timestamp without time zone
+        - emotion_label: string ('Angry', 'Sad', 'Happy', 'Fear')
+        - confidence_score: float (0.0 to 1.0)
+        - emotional_score: integer (0 to 100) or None
+    """
+    try:
+        client = get_supabase_client()
+        from datetime import datetime, timedelta, timezone
+        
+        # Calculate cutoff time (hours ago from now)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+        
+        response = client.table("emotional_log")\
+            .select("id, user_id, timestamp, emotion_label, confidence_score, emotional_score")\
+            .eq("user_id", user_id)\
+            .gte("timestamp", cutoff_time.isoformat())\
+            .order("timestamp", desc=False)\
+            .execute()
+        
+        logs = response.data
+        logger.info(f"Fetched {len(logs)} emotion logs for user {user_id} (last {hours} hours)")
+        return logs
+    except Exception as e:
+        logger.error(f"Failed to fetch emotion logs for user {user_id}: {e}")
+        return []
+
+
+def fetch_recent_activity_logs(user_id: str, hours: int = 24) -> List[Dict]:
+    """
+    Fetch recent activity logs for a user from the intervention_log table.
+    
+    Args:
+        user_id: UUID of the user
+        hours: Number of hours to look back (default: 24)
+    
+    Returns:
+        List of activity log dictionaries, each containing:
+        - id: bigint
+        - public_id: uuid
+        - user_id: uuid
+        - emotional_log_id: bigint or None
+        - intervention_type: string ('journal', 'gratitude', 'meditation', 'quote')
+        - timestamp: timestamp without time zone
+        - duration: interval or None
+    """
+    try:
+        client = get_supabase_client()
+        from datetime import datetime, timedelta, timezone
+        
+        # Calculate cutoff time (hours ago from now)
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+        
+        response = client.table("intervention_log")\
+            .select("id, public_id, user_id, emotional_log_id, intervention_type, timestamp, duration")\
+            .eq("user_id", user_id)\
+            .gte("timestamp", cutoff_time.isoformat())\
+            .order("timestamp", desc=False)\
+            .execute()
+        
+        logs = response.data
+        logger.info(f"Fetched {len(logs)} activity logs for user {user_id} (last {hours} hours)")
+        return logs
+    except Exception as e:
+        logger.error(f"Failed to fetch activity logs for user {user_id}: {e}")
+        return []
+
+
+def fetch_user_preferences(user_id: str) -> Dict:
+    """
+    Fetch user preferences from the users table, specifically the prefer_intervention JSONB field.
+    
+    Args:
+        user_id: UUID of the user
+    
+    Returns:
+        Dictionary with preference flags for each activity type.
+        Default structure: {"plan": bool, "music": bool, "quote": bool, "converse": bool, 
+                           "breathing": bool, "gratitude": bool, "journaling": bool}
+        Returns default preferences if user not found or field missing.
+    """
+    try:
+        client = get_supabase_client()
+        
+        response = client.table("users")\
+            .select("prefer_intervention")\
+            .eq("id", user_id)\
+            .single()\
+            .execute()
+        
+        if response.data and "prefer_intervention" in response.data:
+            preferences = response.data["prefer_intervention"]
+            logger.info(f"Fetched preferences for user {user_id}: {preferences}")
+            return preferences
+        else:
+            # Return default preferences
+            default_prefs = {
+                "plan": True,
+                "music": True,
+                "quote": True,
+                "converse": True,
+                "breathing": True,
+                "gratitude": True,
+                "journaling": True
+            }
+            logger.warning(f"No preferences found for user {user_id}, using defaults")
+            return default_prefs
+    except Exception as e:
+        logger.error(f"Failed to fetch preferences for user {user_id}: {e}")
+        # Return default preferences on error
+        return {
+            "plan": True,
+            "music": True,
+            "quote": True,
+            "converse": True,
+            "breathing": True,
+            "gratitude": True,
+            "journaling": True
+        }
+
+
+def get_time_since_last_activity(user_id: str) -> float:
+    """
+    Calculate the time (in minutes) since the last activity for a user.
+    
+    Args:
+        user_id: UUID of the user
+    
+    Returns:
+        Number of minutes since last activity. Returns float('inf') if no activities found.
+    """
+    try:
+        client = get_supabase_client()
+        from datetime import datetime, timezone
+        
+        # Get the most recent activity
+        response = client.table("intervention_log")\
+            .select("timestamp")\
+            .eq("user_id", user_id)\
+            .order("timestamp", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if response.data and len(response.data) > 0:
+            last_timestamp_str = response.data[0]["timestamp"]
+            # Parse timestamp (assuming it's in ISO format, timezone-naive)
+            last_timestamp = datetime.fromisoformat(last_timestamp_str.replace('Z', '+00:00'))
+            if last_timestamp.tzinfo is None:
+                # Assume UTC if timezone-naive
+                last_timestamp = last_timestamp.replace(tzinfo=timezone.utc)
+            
+            now = datetime.now(timezone.utc)
+            time_diff = now - last_timestamp
+            minutes = time_diff.total_seconds() / 60.0
+            logger.info(f"Time since last activity for user {user_id}: {minutes:.2f} minutes")
+            return minutes
+        else:
+            logger.info(f"No activities found for user {user_id}, returning infinity")
+            return float('inf')
+    except Exception as e:
+        logger.error(f"Failed to get time since last activity for user {user_id}: {e}")
+        return float('inf')
