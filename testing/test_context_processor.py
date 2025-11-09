@@ -2,16 +2,24 @@
 Test script for context_processor.py
 
 This script tests the process_user_context function.
-Run it with: python test_context_processor.py
+Run it with: python testing/test_context_processor.py
+Or from the testing directory: python test_context_processor.py
 """
 
 import os
 import sys
+from pathlib import Path
 from dotenv import load_dotenv
-import context_processor
 
-# Load environment variables
-load_dotenv()
+# Add parent directory to path to allow imports from root
+parent_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(parent_dir))
+
+from context_generator import context_processor
+
+# Load environment variables from parent directory
+env_path = parent_dir / ".env"
+load_dotenv(dotenv_path=env_path)
 
 def test_process_user_context():
     """Test the process_user_context function."""

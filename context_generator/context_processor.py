@@ -10,8 +10,8 @@ import logging
 from typing import List, Dict
 from dotenv import load_dotenv
 
-import database
-from llm import DeepSeekClient
+from utils import database
+from utils.llm import DeepSeekClient
 
 # Load environment variables from .env file
 load_dotenv()

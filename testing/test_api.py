@@ -2,16 +2,23 @@
 Test script for the Well-Bot CMS API
 
 This script tests the /api/context/process endpoint using DEV_USER_ID from .env file.
-Run it with: python test_api.py
+Run it with: python testing/test_api.py
+Or from the testing directory: python test_api.py
 """
 
 import os
 import sys
+from pathlib import Path
 import requests
 from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
+# Add parent directory to path to allow imports from root (if needed)
+parent_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(parent_dir))
+
+# Load environment variables from parent directory
+env_path = parent_dir / ".env"
+load_dotenv(dotenv_path=env_path)
 
 def test_api_endpoint():
     """Test the /api/context/process endpoint."""
@@ -84,7 +91,7 @@ def test_api_endpoint():
         
     except requests.exceptions.ConnectionError:
         print("\nERROR: Could not connect to the API server")
-        print("Make sure the server is running: python main.py")
+        print("Make sure the server is running from the root directory: python main.py")
         return False
     except requests.exceptions.Timeout:
         print("\nERROR: Request timed out (took longer than 10 minutes)")
