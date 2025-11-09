@@ -10,10 +10,8 @@ import logging
 from datetime import datetime
 
 # Import modules
-import database
-import context_processor
-import facts_extractor
-import schemas
+from utils import database, schemas
+from context_generator import context_processor, facts_extractor
 
 # Setup logging with timestamps
 logging.basicConfig(
