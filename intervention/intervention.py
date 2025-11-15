@@ -80,14 +80,15 @@ def process_suggestion_request(request: SuggestionRequest) -> SuggestionResponse
     Process an intervention suggestion request.
     
     This orchestrates the complete flow:
-    1. Fetch user data from database (emotion logs, activity logs, preferences)
-    2. Calculate time since last activity
-    3. Call decision engine for kick-start decision
-    4. Call suggestion engine for activity recommendations
-    5. Return structured response
+    1. Fetch latest emotion from database
+    2. Fetch user data from database (emotion logs, activity logs, preferences)
+    3. Calculate time since last activity
+    4. Call decision engine for kick-start decision
+    5. Call suggestion engine for activity recommendations
+    6. Return structured response
     
     Args:
-        request: SuggestionRequest with user_id, emotion_label, confidence_score, timestamp
+        request: SuggestionRequest with user_id
     
     Returns:
         SuggestionResponse with decision and suggestion results
@@ -95,8 +96,29 @@ def process_suggestion_request(request: SuggestionRequest) -> SuggestionResponse
     logger.info(f"Processing suggestion request for user {request.user_id}")
     
     try:
-        # 1. Fetch data from database
-        logger.debug("Fetching data from database...")
+        # 1. Fetch latest emotion from database
+        logger.debug("Fetching latest emotion from database...")
+        latest_emotion = database.get_latest_emotion_log(request.user_id)
+        if not latest_emotion:
+            raise ValueError(f"No emotion logs found for user {request.user_id}")
+        
+        emotion_label = latest_emotion.get('emotion_label')
+        confidence_score = latest_emotion.get('confidence_score')
+        emotion_timestamp_str = latest_emotion.get('timestamp')
+        
+        if not emotion_label or confidence_score is None or not emotion_timestamp_str:
+            raise ValueError(f"Invalid emotion log data for user {request.user_id}: missing required fields")
+        
+        # Parse timestamp string to datetime if needed
+        if isinstance(emotion_timestamp_str, str):
+            emotion_timestamp = datetime.fromisoformat(emotion_timestamp_str.replace('Z', '+00:00'))
+        else:
+            emotion_timestamp = emotion_timestamp_str
+        
+        logger.info(f"Using latest emotion from database: {emotion_label} (confidence: {confidence_score:.2f})")
+        
+        # 2. Fetch other user data from database
+        logger.debug("Fetching other user data from database...")
         recent_emotion_logs = database.fetch_recent_emotion_logs(request.user_id, hours=48)
         recent_activity_logs = database.fetch_recent_activity_logs(request.user_id, hours=24)
         user_preferences = database.fetch_user_preferences(request.user_id)
@@ -104,18 +126,18 @@ def process_suggestion_request(request: SuggestionRequest) -> SuggestionResponse
         
         logger.debug(f"Fetched {len(recent_emotion_logs)} emotion logs, {len(recent_activity_logs)} activity logs")
         
-        # 2. Determine time of day context
+        # 3. Determine time of day context
         time_of_day = request.context_time_of_day
         if not time_of_day:
-            time_of_day = get_time_of_day_context(request.timestamp)
+            time_of_day = get_time_of_day_context(emotion_timestamp)
         
         logger.debug(f"Time of day context: {time_of_day}")
         
-        # 3. Call decision engine
+        # 4. Call decision engine with fetched emotion
         logger.debug("Calling decision engine...")
         trigger_intervention, decision_confidence, decision_reasoning = decide_trigger_intervention(
-            emotion_label=request.emotion_label,
-            confidence_score=request.confidence_score,
+            emotion_label=emotion_label,
+            confidence_score=confidence_score,
             time_since_last_activity_minutes=time_since_last_activity
         )
         
@@ -125,10 +147,10 @@ def process_suggestion_request(request: SuggestionRequest) -> SuggestionResponse
             reasoning=decision_reasoning
         )
         
-        # 4. Call suggestion engine (always generate suggestions, regardless of trigger decision)
+        # 5. Call suggestion engine with fetched emotion (always generate suggestions, regardless of trigger decision)
         logger.debug("Calling suggestion engine...")
         ranked_activities_list, suggestion_reasoning = suggest_activities(
-            emotion_label=request.emotion_label,
+            emotion_label=emotion_label,
             user_preferences=user_preferences,
             recent_activity_logs=recent_activity_logs,
             time_of_day=time_of_day

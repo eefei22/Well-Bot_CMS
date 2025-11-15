@@ -123,13 +123,15 @@ async def suggest_intervention(request: schemas.SuggestionRequest):
     Suggest intervention activities based on emotion and user history.
     
     This endpoint:
-    1. Fetches recent emotion logs and activity history for the user
-    2. Determines if an intervention should be triggered (kick-start decision)
-    3. Generates ranked activity suggestions (1-5) with scores
-    4. Returns both the decision and suggestions
+    1. Accepts user_id only
+    2. Fetches latest emotion from database for the user
+    3. Fetches recent emotion logs and activity history for the user
+    4. Determines if an intervention should be triggered (kick-start decision)
+    5. Generates ranked activity suggestions (1-5) with scores
+    6. Returns both the decision and suggestions
     
     Args:
-        request: SuggestionRequest containing user_id, emotion_label, confidence_score, timestamp
+        request: SuggestionRequest containing user_id
     
     Returns:
         SuggestionResponse with decision (trigger_intervention, confidence) and 
@@ -137,7 +139,7 @@ async def suggest_intervention(request: schemas.SuggestionRequest):
     """
     start_time = datetime.now()
     logger.info(f"POST /api/intervention/suggest - Endpoint called at {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"  User ID: {request.user_id}, Emotion: {request.emotion_label}, Confidence: {request.confidence_score}")
+    logger.info(f"  User ID: {request.user_id}")
     
     try:
         response = intervention.process_suggestion_request(request)
