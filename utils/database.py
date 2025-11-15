@@ -10,6 +10,7 @@ from typing import Dict, List, Optional
 from supabase import create_client, Client
 from dotenv import load_dotenv
 import logging
+from datetime import datetime, timezone, timedelta
 
 # Load environment variables from .env file
 load_dotenv()
@@ -18,6 +19,64 @@ load_dotenv()
 if not logging.getLogger().handlers:
     logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def get_malaysia_timezone():
+    """
+    Get Malaysia timezone (UTC+8) object.
+    Tries zoneinfo first, falls back to pytz, then manual offset.
+    
+    Returns:
+        Timezone object for Asia/Kuala_Lumpur (UTC+8)
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return ZoneInfo("Asia/Kuala_Lumpur")
+    except (ImportError, Exception):
+        # ZoneInfoNotFoundError, ImportError, or other issues - fall back to pytz
+        try:
+            import pytz
+            return pytz.timezone("Asia/Kuala_Lumpur")
+        except ImportError:
+            # Final fallback: manual UTC+8 offset
+            return timezone(timedelta(hours=8))
+
+
+def get_current_time_utc8() -> datetime:
+    """
+    Get current time in UTC+8 (Malaysia timezone).
+    
+    Returns:
+        Datetime object with UTC+8 timezone
+    """
+    malaysia_tz = get_malaysia_timezone()
+    return datetime.now(malaysia_tz)
+
+
+def parse_database_timestamp(timestamp_str: str) -> datetime:
+    """
+    Parse a database timestamp string, assuming it's stored in UTC+8.
+    Database stores timestamps as timezone-naive in UTC+8.
+    
+    Args:
+        timestamp_str: ISO format timestamp string from database
+    
+    Returns:
+        Datetime object with UTC+8 timezone
+    """
+    malaysia_tz = get_malaysia_timezone()
+    
+    # Parse timestamp (assuming it's in ISO format, timezone-naive)
+    timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+    
+    # If timezone-naive, assume it's UTC+8 (database timezone)
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(tzinfo=malaysia_tz)
+    else:
+        # If it has timezone info, convert to UTC+8
+        timestamp = timestamp.astimezone(malaysia_tz)
+    
+    return timestamp
 
 
 def get_supabase_config() -> Dict[str, str]:
@@ -192,17 +251,17 @@ def fetch_recent_emotion_logs(user_id: str, hours: int = 48) -> List[Dict]:
         List of emotion log dictionaries, each containing:
         - id: integer
         - user_id: uuid
-        - timestamp: timestamp without time zone
+        - timestamp: timestamp without time zone (stored in UTC+8)
         - emotion_label: string ('Angry', 'Sad', 'Happy', 'Fear')
         - confidence_score: float (0.0 to 1.0)
         - emotional_score: integer (0 to 100) or None
     """
     try:
         client = get_supabase_client()
-        from datetime import datetime, timedelta, timezone
+        from datetime import timedelta
         
-        # Calculate cutoff time (hours ago from now)
-        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+        # Calculate cutoff time (hours ago from now) in UTC+8
+        cutoff_time = get_current_time_utc8() - timedelta(hours=hours)
         
         response = client.table("emotional_log")\
             .select("id, user_id, timestamp, emotion_label, confidence_score, emotional_score")\
@@ -268,15 +327,15 @@ def fetch_recent_activity_logs(user_id: str, hours: int = 24) -> List[Dict]:
         - user_id: uuid
         - emotional_log_id: bigint or None
         - intervention_type: string ('journal', 'gratitude', 'meditation', 'quote')
-        - timestamp: timestamp without time zone
+        - timestamp: timestamp without time zone (stored in UTC+8)
         - duration: interval or None
     """
     try:
         client = get_supabase_client()
-        from datetime import datetime, timedelta, timezone
+        from datetime import timedelta
         
-        # Calculate cutoff time (hours ago from now)
-        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+        # Calculate cutoff time (hours ago from now) in UTC+8
+        cutoff_time = get_current_time_utc8() - timedelta(hours=hours)
         
         response = client.table("intervention_log")\
             .select("id, public_id, user_id, emotional_log_id, intervention_type, timestamp, duration")\
@@ -349,6 +408,7 @@ def fetch_user_preferences(user_id: str) -> Dict:
 def get_time_since_last_activity(user_id: str) -> float:
     """
     Calculate the time (in minutes) since the last activity for a user.
+    Database timestamps are stored in UTC+8 (timezone-naive).
     
     Args:
         user_id: UUID of the user
@@ -358,7 +418,6 @@ def get_time_since_last_activity(user_id: str) -> float:
     """
     try:
         client = get_supabase_client()
-        from datetime import datetime, timezone
         
         # Get the most recent activity
         response = client.table("intervention_log")\
@@ -370,13 +429,11 @@ def get_time_since_last_activity(user_id: str) -> float:
         
         if response.data and len(response.data) > 0:
             last_timestamp_str = response.data[0]["timestamp"]
-            # Parse timestamp (assuming it's in ISO format, timezone-naive)
-            last_timestamp = datetime.fromisoformat(last_timestamp_str.replace('Z', '+00:00'))
-            if last_timestamp.tzinfo is None:
-                # Assume UTC if timezone-naive
-                last_timestamp = last_timestamp.replace(tzinfo=timezone.utc)
+            # Parse timestamp as UTC+8 (database timezone)
+            last_timestamp = parse_database_timestamp(last_timestamp_str)
             
-            now = datetime.now(timezone.utc)
+            # Get current time in UTC+8
+            now = get_current_time_utc8()
             time_diff = now - last_timestamp
             minutes = time_diff.total_seconds() / 60.0
             logger.info(f"Time since last activity for user {user_id}: {minutes:.2f} minutes")
