@@ -37,7 +37,7 @@ def get_time_of_day_context(timestamp: datetime) -> str:
     - night: 21:00 - 4:59
     
     Args:
-        timestamp: Datetime object (assumed UTC if timezone-naive)
+        timestamp: Datetime object (assumed UTC+8 if timezone-naive, since database stores in UTC+8)
     
     Returns:
         One of: 'morning', 'afternoon', 'evening', 'night'
@@ -59,10 +59,14 @@ def get_time_of_day_context(timestamp: datetime) -> str:
             MALAYSIA_TZ = timezone(timedelta(hours=8))
     
     # Convert to Malaysian timezone
+    # If timezone-naive, assume it's UTC+8 (database timezone), not UTC
     if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=timezone.utc)
+        timestamp = timestamp.replace(tzinfo=MALAYSIA_TZ)
+    else:
+        # If it has timezone info, convert to UTC+8
+        timestamp = timestamp.astimezone(MALAYSIA_TZ)
     
-    timestamp_malaysia = timestamp.astimezone(MALAYSIA_TZ)
+    timestamp_malaysia = timestamp
     hour = timestamp_malaysia.hour
     
     if 5 <= hour < 12:
@@ -109,9 +113,9 @@ def process_suggestion_request(request: SuggestionRequest) -> SuggestionResponse
         if not emotion_label or confidence_score is None or not emotion_timestamp_str:
             raise ValueError(f"Invalid emotion log data for user {request.user_id}: missing required fields")
         
-        # Parse timestamp string to datetime if needed
+        # Parse timestamp string to datetime if needed (database stores in UTC+8)
         if isinstance(emotion_timestamp_str, str):
-            emotion_timestamp = datetime.fromisoformat(emotion_timestamp_str.replace('Z', '+00:00'))
+            emotion_timestamp = database.parse_database_timestamp(emotion_timestamp_str)
         else:
             emotion_timestamp = emotion_timestamp_str
         
