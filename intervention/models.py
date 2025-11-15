@@ -13,9 +13,6 @@ from datetime import datetime
 class SuggestionRequest(BaseModel):
     """Request model for intervention suggestion endpoint."""
     user_id: str
-    emotion_label: str  # 'Angry', 'Sad', 'Happy', 'Fear'
-    confidence_score: float  # 0.0 to 1.0
-    timestamp: datetime
     context_time_of_day: Optional[str] = None  # 'morning', 'afternoon', 'evening', 'night'
 
 

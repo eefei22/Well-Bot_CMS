@@ -6,7 +6,7 @@ Combines database connection and message loading functionality.
 """
 
 import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 from supabase import create_client, Client
 from dotenv import load_dotenv
 import logging
@@ -217,6 +217,40 @@ def fetch_recent_emotion_logs(user_id: str, hours: int = 48) -> List[Dict]:
     except Exception as e:
         logger.error(f"Failed to fetch emotion logs for user {user_id}: {e}")
         return []
+
+
+def get_latest_emotion_log(user_id: str) -> Optional[Dict]:
+    """
+    Get the latest emotion log entry for a user.
+    
+    Args:
+        user_id: UUID of the user
+    
+    Returns:
+        Dictionary with latest emotion log data or None if not found.
+        Contains: id, user_id, timestamp, emotion_label, confidence_score, emotional_score
+    """
+    try:
+        client = get_supabase_client()
+        
+        response = client.table("emotional_log")\
+            .select("id, user_id, timestamp, emotion_label, confidence_score, emotional_score")\
+            .eq("user_id", user_id)\
+            .order("timestamp", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if response.data and len(response.data) > 0:
+            latest = response.data[0]
+            logger.info(f"Fetched latest emotion log for user {user_id}: {latest.get('emotion_label')} "
+                       f"(confidence: {latest.get('confidence_score'):.2f})")
+            return latest
+        else:
+            logger.info(f"No emotion logs found for user {user_id}")
+            return None
+    except Exception as e:
+        logger.error(f"Failed to fetch latest emotion log for user {user_id}: {e}")
+        return None
 
 
 def fetch_recent_activity_logs(user_id: str, hours: int = 24) -> List[Dict]:
