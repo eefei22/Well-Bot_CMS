@@ -405,6 +405,144 @@ def fetch_user_preferences(user_id: str) -> Dict:
         }
 
 
+def check_embedding_exists(ref_id: str, model_tag: str) -> bool:
+    """
+    Check if an embedding already exists for a given ref_id and model_tag.
+    Used for idempotence - prevents duplicate embeddings.
+    
+    Args:
+        ref_id: Reference ID (message ID or chunk ID)
+        model_tag: Model tag ('miniLM' or 'e5')
+    
+    Returns:
+        True if embedding exists, False otherwise
+    """
+    try:
+        client = get_supabase_client()
+        
+        response = client.table("wb_embeddings")\
+            .select("id")\
+            .eq("ref_id", ref_id)\
+            .eq("model_tag", model_tag)\
+            .limit(1)\
+            .execute()
+        
+        exists = len(response.data) > 0
+        return exists
+        
+    except Exception as e:
+        logger.error(f"Failed to check embedding existence for ref_id {ref_id}, model_tag {model_tag}: {e}")
+        return False
+
+
+def store_embedding(
+    user_id: str,
+    kind: str,
+    ref_id: str,
+    vector: List[float],
+    model_tag: str
+) -> bool:
+    """
+    Store an embedding vector in the wb_embeddings table.
+    
+    Args:
+        user_id: UUID of the user
+        kind: Type of embedding ('message', 'journal', 'todo', 'preference', 'gratitude')
+        ref_id: Reference ID (message ID or chunk ID)
+        vector: Embedding vector as list of floats
+        model_tag: Model tag ('miniLM' or 'e5')
+    
+    Returns:
+        True if storage succeeded, False otherwise
+    """
+    try:
+        client = get_supabase_client()
+        
+        # Convert vector to pgvector format (string representation)
+        # Supabase pgvector expects format: "[0.1,0.2,...]"
+        vector_str = "[" + ",".join(str(v) for v in vector) + "]"
+        
+        payload = {
+            "user_id": user_id,
+            "kind": kind,
+            "ref_id": ref_id,
+            "vector": vector_str,
+            "model_tag": model_tag
+        }
+        
+        response = client.table("wb_embeddings")\
+            .insert(payload)\
+            .execute()
+        
+        if response.data:
+            logger.debug(f"Successfully stored embedding for ref_id {ref_id}, model_tag {model_tag}")
+            return True
+        else:
+            logger.warning(f"No data returned for embedding storage for ref_id {ref_id}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Failed to store embedding for ref_id {ref_id}, model_tag {model_tag}: {e}")
+        return False
+
+
+def load_conversation_messages(conversation_id: str) -> List[Dict]:
+    """
+    Load all user messages for a specific conversation.
+    
+    Args:
+        conversation_id: UUID of the conversation
+    
+    Returns:
+        List of message dictionaries, each containing:
+        - id: Message UUID
+        - text: Message text
+        - created_at: Timestamp
+        - role: Message role (should be "user")
+    """
+    try:
+        client = get_supabase_client()
+        
+        response = client.table("wb_message")\
+            .select("id, text, created_at, role")\
+            .eq("conversation_id", conversation_id)\
+            .eq("role", "user")\
+            .order("created_at", desc=False)\
+            .execute()
+        
+        messages = response.data
+        logger.info(f"Loaded {len(messages)} user messages for conversation {conversation_id}")
+        return messages
+        
+    except Exception as e:
+        logger.error(f"Failed to load messages for conversation {conversation_id}: {e}")
+        return []
+
+
+def get_all_users() -> List[str]:
+    """
+    Get all user IDs from the database.
+    Used for migration purposes.
+    
+    Returns:
+        List of user UUIDs
+    """
+    try:
+        client = get_supabase_client()
+        
+        response = client.table("users")\
+            .select("id")\
+            .execute()
+        
+        user_ids = [user["id"] for user in response.data]
+        logger.info(f"Retrieved {len(user_ids)} users from database")
+        return user_ids
+        
+    except Exception as e:
+        logger.error(f"Failed to get all users: {e}")
+        return []
+
+
 def get_time_since_last_activity(user_id: str) -> float:
     """
     Calculate the time (in minutes) since the last activity for a user.
