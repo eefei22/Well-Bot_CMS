@@ -1,14 +1,14 @@
 """
-Test script for context_processor.py
+Test script for context_extractor.py
 
 This script tests the process_user_context function.
-Run it with: python test_context_processor.py
+Run it with: python test_context_extractor.py
 """
 
 import os
 import sys
 from dotenv import load_dotenv
-import context_processor
+from context_generator import context_extractor
 
 # Load environment variables
 load_dotenv()
@@ -33,12 +33,14 @@ def test_process_user_context():
         print("Please set DEEPSEEK_API_KEY in your .env file")
         sys.exit(1)
     
-    print(f"Testing context processor for user: {user_id}\n")
+    print(f"Testing context extractor for user: {user_id}\n")
     print("=" * 60)
     
     try:
-        # Process user context
-        persona_summary = context_processor.process_user_context(user_id)
+        # Process user context using the new 3-part architecture
+        from context_generator import message_preprocessor
+        preprocessed_messages = message_preprocessor.preprocess_user_messages(user_id)
+        persona_summary = context_extractor.process_user_context(user_id, preprocessed_messages)
         
         print("\n" + "=" * 60)
         print("SUCCESS! Persona summary generated:")
@@ -62,6 +64,4 @@ def test_process_user_context():
 if __name__ == "__main__":
     success = test_process_user_context()
     sys.exit(0 if success else 1)
-
-
 
