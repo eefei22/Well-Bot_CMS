@@ -94,12 +94,12 @@ async def process_user_context(request: schemas.ProcessContextRequest):
             logger.error(f"  Facts extraction failed at {facts_end.strftime('%H:%M:%S')} after {facts_duration:.2f}s: {e}")
             # Don't raise - allow context extraction to proceed
         
-        # Step 3: Extract daily life context
+        # Step 3: Extract daily life context (using semantic vector search)
         persona_summary = None
         context_start = datetime.now()
         logger.info(f"  Starting context extraction at {context_start.strftime('%H:%M:%S')}")
         try:
-            persona_summary = context_extractor.process_user_context(request.user_id, preprocessed_messages)
+            persona_summary = context_extractor.process_user_context(request.user_id)
             context_end = datetime.now()
             context_duration = (context_end - context_start).total_seconds()
             logger.info(f"  Context extraction completed at {context_end.strftime('%H:%M:%S')} (took {context_duration:.2f}s)")
