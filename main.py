@@ -11,7 +11,7 @@ from datetime import datetime
 
 # Import modules
 from utils import database, schemas
-from context_generator import context_processor, facts_extractor
+from context_generator import context_extractor, facts_extractor, message_preprocessor
 from intervention import intervention
 
 # Setup logging with timestamps
@@ -65,12 +65,26 @@ async def process_user_context(request: schemas.ProcessContextRequest):
     logger.info(f"  User ID: {request.user_id}")
     
     try:
-        # Extract persona facts first
+        # Step 1: Query and preprocess messages (single database query)
+        preprocess_start = datetime.now()
+        logger.info(f"  Starting message preprocessing at {preprocess_start.strftime('%H:%M:%S')}")
+        try:
+            preprocessed_messages = message_preprocessor.preprocess_user_messages(request.user_id)
+            preprocess_end = datetime.now()
+            preprocess_duration = (preprocess_end - preprocess_start).total_seconds()
+            logger.info(f"  Message preprocessing completed at {preprocess_end.strftime('%H:%M:%S')} (took {preprocess_duration:.2f}s)")
+        except Exception as e:
+            preprocess_end = datetime.now()
+            preprocess_duration = (preprocess_end - preprocess_start).total_seconds()
+            logger.error(f"  Message preprocessing failed at {preprocess_end.strftime('%H:%M:%S')} after {preprocess_duration:.2f}s: {e}")
+            raise  # Preprocessing failure blocks both extractions
+        
+        # Step 2: Extract persona facts
         facts = None
         facts_start = datetime.now()
         logger.info(f"  Starting facts extraction at {facts_start.strftime('%H:%M:%S')}")
         try:
-            facts = facts_extractor.extract_user_facts(request.user_id)
+            facts = facts_extractor.extract_user_facts(request.user_id, preprocessed_messages)
             facts_end = datetime.now()
             facts_duration = (facts_end - facts_start).total_seconds()
             logger.info(f"  Facts extraction completed at {facts_end.strftime('%H:%M:%S')} (took {facts_duration:.2f}s)")
@@ -80,12 +94,12 @@ async def process_user_context(request: schemas.ProcessContextRequest):
             logger.error(f"  Facts extraction failed at {facts_end.strftime('%H:%M:%S')} after {facts_duration:.2f}s: {e}")
             # Don't raise - allow context extraction to proceed
         
-        # Extract daily life context
+        # Step 3: Extract daily life context
         persona_summary = None
         context_start = datetime.now()
         logger.info(f"  Starting context extraction at {context_start.strftime('%H:%M:%S')}")
         try:
-            persona_summary = context_processor.process_user_context(request.user_id)
+            persona_summary = context_extractor.process_user_context(request.user_id, preprocessed_messages)
             context_end = datetime.now()
             context_duration = (context_end - context_start).total_seconds()
             logger.info(f"  Context extraction completed at {context_end.strftime('%H:%M:%S')} (took {context_duration:.2f}s)")

@@ -1,13 +1,13 @@
 """
 Facts Extractor Script
 
-This script retrieves and extracts key user persona facts from the database.
+This script extracts key user persona facts from preprocessed messages.
 Extracts communication style, interests, personality traits, values, and concerns.
 """
 
 import os
 import logging
-from typing import List, Dict
+from typing import List
 from dotenv import load_dotenv
 
 from utils import database
@@ -22,103 +22,23 @@ if not logging.getLogger().handlers:
 logger = logging.getLogger(__name__)
 
 
-def _filter_messages(messages: List[str], min_words: int = 4) -> List[str]:
+def extract_user_facts(user_id: str, preprocessed_messages: List[str]) -> str:
     """
-    Filter messages to keep only those with at least min_words words.
-    For Chinese/CJK text, counts characters instead of words.
-    
-    Args:
-        messages: List of message texts
-        min_words: Minimum number of words required (default: 4)
-    
-    Returns:
-        Filtered list of messages
-    """
-    def _has_cjk_characters(text: str) -> bool:
-        """Check if text contains Chinese, Japanese, or Korean characters."""
-        for char in text:
-            if '\u4e00' <= char <= '\u9fff':  # Chinese
-                return True
-            if '\u3040' <= char <= '\u309f':  # Hiragana
-                return True
-            if '\u30a0' <= char <= '\u30ff':  # Katakana
-                return True
-            if '\uac00' <= char <= '\ud7a3':  # Korean
-                return True
-        return False
-    
-    filtered = []
-    for msg in messages:
-        # For Chinese/CJK text, count characters instead of words
-        if _has_cjk_characters(msg):
-            # Count non-whitespace characters for CJK languages
-            char_count = len([c for c in msg if not c.isspace()])
-            if char_count >= min_words:
-                filtered.append(msg)
-            else:
-                logger.debug(f"Filtered out short CJK message: {msg[:50]}... (chars: {char_count})")
-        else:
-            # For languages with spaces, count words
-            word_count = len(msg.split())
-            if word_count >= min_words:
-                filtered.append(msg)
-            else:
-                logger.debug(f"Filtered out short message: {msg[:50]}... (words: {word_count})")
-    return filtered
-
-
-def _normalize_message(text: str) -> str:
-    """
-    Normalize a message: lowercase, strip whitespace, remove extra spaces.
-    
-    Args:
-        text: Message text to normalize
-    
-    Returns:
-        Normalized message text
-    """
-    # Lowercase, strip, and remove extra spaces
-    normalized = ' '.join(text.lower().strip().split())
-    return normalized
-
-
-def _extract_message_texts(conversations: List[Dict]) -> List[str]:
-    """
-    Extract all message texts from the conversation structure.
-    
-    Args:
-        conversations: List of conversation dictionaries from load_user_messages
-    
-    Returns:
-        List of message text strings
-    """
-    messages = []
-    for conv in conversations:
-        for msg in conv.get("messages", []):
-            text = msg.get("text", "")
-            if text:
-                messages.append(text)
-    return messages
-
-
-def extract_user_facts(user_id: str) -> str:
-    """
-    Extract user persona facts and characteristics from messages.
+    Extract user persona facts and characteristics from preprocessed messages.
     
     This function:
-    1. Loads all user messages from the database
-    2. Filters and normalizes messages
-    3. Uses DeepSeek reasoning model to extract persona characteristics
-    4. Saves the facts to users_context_bundle table (facts field)
+    1. Uses DeepSeek reasoning model to extract persona characteristics from preprocessed messages
+    2. Saves the facts to users_context_bundle table (facts field)
     
     Args:
         user_id: UUID of the user
+        preprocessed_messages: List of normalized message strings (already filtered and normalized)
     
     Returns:
         Generated persona facts summary string
     
     Raises:
-        ValueError: If API key is missing or no messages found
+        ValueError: If API key is missing or preprocessed_messages is empty
         Exception: If LLM API call fails
     """
     # Load API key
@@ -126,34 +46,13 @@ def extract_user_facts(user_id: str) -> str:
     if not api_key:
         raise ValueError("DEEPSEEK_API_KEY environment variable is required")
     
-    # Load user messages
-    logger.info(f"Loading messages for user {user_id}")
-    conversations = database.load_user_messages(user_id)
+    if not preprocessed_messages:
+        raise ValueError("preprocessed_messages cannot be empty")
     
-    if not conversations:
-        raise ValueError(f"No conversations found for user {user_id}")
-    
-    # Extract all message texts
-    all_messages = _extract_message_texts(conversations)
-    
-    if not all_messages:
-        raise ValueError(f"No messages found for user {user_id}")
-    
-    logger.info(f"Extracted {len(all_messages)} total messages")
-    
-    # Filter messages (discard very short ones)
-    filtered_messages = _filter_messages(all_messages, min_words=4)
-    
-    if not filtered_messages:
-        raise ValueError(f"No messages with sufficient length found for user {user_id}")
-    
-    logger.info(f"After filtering: {len(filtered_messages)} messages")
-    
-    # Normalize messages
-    normalized_messages = [_normalize_message(msg) for msg in filtered_messages]
+    logger.info(f"Extracting persona facts from {len(preprocessed_messages)} preprocessed messages for user {user_id}")
     
     # Format messages for LLM prompt
-    messages_text = "\n".join([f"- {msg}" for msg in normalized_messages])
+    messages_text = "\n".join([f"- {msg}" for msg in preprocessed_messages])
     
     # Create prompt for persona facts extraction
     prompt = f"""You are an intelligent user-profiling assistant.  
