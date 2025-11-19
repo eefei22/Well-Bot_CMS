@@ -4,6 +4,7 @@ Suggestion Engine
 This module implements the activity recommendation algorithm to determine
 which activities to suggest and in what order.
 """
+# TODO: ADJUST LOGIC TO ACCOUNT FOR FREQUENCY OF ACTIVITIES, AND USER PREFERENCES
 
 from typing import List, Dict, Optional, Tuple
 import logging
@@ -29,16 +30,16 @@ EMOTION_ACTIVITY_WEIGHTS = {
         'gratitude': 0.5
     },
     'Fear': {
-        'gratitude': 0.8,
-        'journal': 0.7,
-        'meditation': 0.7,
-        'quote': 0.6
+        'meditation': 0.8,
+        'quote': 0.7, 
+        'journal': 0.7, 
+        'gratitude': 0.6  
     },
     'Happy': {
-        'gratitude': 0.8,
-        'journal': 0.7,
-        'quote': 0.6,
-        'meditation': 0.5
+        'gratitude': 0.8, 
+        'journal': 0.7, 
+        'quote': 0.6, 
+        'meditation': 0.5 
     }
 }
 

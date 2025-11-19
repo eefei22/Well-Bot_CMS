@@ -130,7 +130,7 @@ def load_user_messages(user_id: str) -> List[Dict]:
     """
     Load all user messages from public.wb_message for a specific user, grouped by conversation.
     
-    This function can be called by context_processor.py to retrieve user messages.
+    This function can be called by context_extractor.py to retrieve user messages.
     
     Args:
         user_id: UUID of the user
