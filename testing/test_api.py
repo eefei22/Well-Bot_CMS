@@ -4,10 +4,13 @@ Test script for the Well-Bot CMS API
 This script tests the /api/context/process endpoint using DEV_USER_ID from .env file.
 Run it with: python testing/test_api.py
 Or from the testing directory: python test_api.py
+
+Optional: Set DEV_CONVERSATION_ID in .env to test with conversation_id (triggers Step 0 embedding)
 """
 
 import os
 import sys
+import argparse
 from pathlib import Path
 import requests
 from dotenv import load_dotenv
@@ -20,7 +23,7 @@ sys.path.insert(0, str(parent_dir))
 env_path = parent_dir / ".env"
 load_dotenv(dotenv_path=env_path)
 
-def test_api_endpoint():
+def test_api_endpoint(conversation_id=None):
     """Test the /api/context/process endpoint."""
     
     # Get user ID from environment variable
@@ -33,6 +36,10 @@ def test_api_endpoint():
         print("DEV_USER_ID=8517c97f-66ef-4955-86ed-531013d33d3e")
         sys.exit(1)
     
+    # Get conversation_id from argument or environment variable
+    if not conversation_id:
+        conversation_id = os.getenv("DEV_CONVERSATION_ID")
+    
     # API endpoint
     api_url = "http://localhost:8000/api/context/process"
     
@@ -40,13 +47,22 @@ def test_api_endpoint():
     payload = {
         "user_id": user_id
     }
+    if conversation_id:
+        payload["conversation_id"] = conversation_id
     
     print(f"Testing API endpoint: {api_url}")
     print(f"Using user_id: {user_id}")
+    if conversation_id:
+        print(f"Using conversation_id: {conversation_id} (will trigger Step 0: embedding)")
+    else:
+        print("No conversation_id provided (skipping Step 0: embedding)")
     print("\n" + "=" * 60)
     print("Sending request...")
     print("=" * 60)
-    print("\nNote: This may take 2-6 minutes (both LLM extractions)")
+    if conversation_id:
+        print("\nNote: This may take 2-6 minutes (embedding + both LLM extractions)")
+    else:
+        print("\nNote: This may take 2-6 minutes (both LLM extractions)")
     print("Processing...\n")
     
     try:
@@ -113,6 +129,14 @@ def test_api_endpoint():
 
 
 if __name__ == "__main__":
-    success = test_api_endpoint()
+    parser = argparse.ArgumentParser(description="Test the Well-Bot CMS API context processing endpoint")
+    parser.add_argument(
+        "--conversation-id",
+        type=str,
+        help="Optional conversation ID to test with (triggers Step 0: embedding new messages)"
+    )
+    args = parser.parse_args()
+    
+    success = test_api_endpoint(conversation_id=args.conversation_id)
     sys.exit(0 if success else 1)
 
