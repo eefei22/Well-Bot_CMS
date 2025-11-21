@@ -486,12 +486,51 @@ def store_embedding(
         return False
 
 
-def load_conversation_messages(conversation_id: str) -> List[Dict]:
+def get_conversation_user_id(conversation_id: str) -> str:
+    """
+    Get the user_id for a given conversation_id.
+    
+    Args:
+        conversation_id: UUID of the conversation
+    
+    Returns:
+        User UUID string
+    
+    Raises:
+        ValueError: If conversation not found
+    """
+    try:
+        client = get_supabase_client()
+        
+        response = client.table("wb_conversation")\
+            .select("user_id")\
+            .eq("id", conversation_id)\
+            .limit(1)\
+            .execute()
+        
+        if not response.data:
+            raise ValueError(f"Conversation {conversation_id} not found")
+        
+        user_id = response.data[0].get("user_id")
+        logger.info(f"Conversation {conversation_id} belongs to user {user_id}")
+        return user_id
+        
+    except ValueError:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get user_id for conversation {conversation_id}: {e}")
+        raise ValueError(f"Failed to get user_id for conversation {conversation_id}: {e}")
+
+
+def load_conversation_messages(conversation_id: str, user_id: str = None) -> List[Dict]:
     """
     Load all user messages for a specific conversation.
     
     Args:
         conversation_id: UUID of the conversation
+        user_id: Optional user_id to validate conversation ownership.
+                 If provided, will raise ValueError if conversation doesn't belong to this user.
+                 If None, will fetch user_id from conversation.
     
     Returns:
         List of message dictionaries, each containing:
@@ -499,9 +538,22 @@ def load_conversation_messages(conversation_id: str) -> List[Dict]:
         - text: Message text
         - created_at: Timestamp
         - role: Message role (should be "user")
+    
+    Raises:
+        ValueError: If user_id is provided and conversation doesn't belong to that user,
+                   or if conversation not found
     """
     try:
         client = get_supabase_client()
+        
+        # Validate conversation ownership if user_id provided
+        if user_id:
+            conv_user_id = get_conversation_user_id(conversation_id)
+            if conv_user_id != user_id:
+                raise ValueError(
+                    f"Conversation {conversation_id} belongs to user {conv_user_id}, "
+                    f"not {user_id}"
+                )
         
         response = client.table("wb_message")\
             .select("id, text, created_at, role")\
@@ -514,6 +566,8 @@ def load_conversation_messages(conversation_id: str) -> List[Dict]:
         logger.info(f"Loaded {len(messages)} user messages for conversation {conversation_id}")
         return messages
         
+    except ValueError:
+        raise
     except Exception as e:
         logger.error(f"Failed to load messages for conversation {conversation_id}: {e}")
         return []

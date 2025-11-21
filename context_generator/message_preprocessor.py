@@ -217,20 +217,23 @@ def _chunk_message(text: str, threshold: int = 500) -> List[Tuple[str, int]]:
     return chunks if chunks else [(text, 0)]
 
 
-def embed_conversation_messages(user_id: str, conversation_id: str, model_tag: str = 'e5') -> Dict:
+def embed_conversation_messages(conversation_id: str, user_id: str = None, model_tag: str = 'e5') -> Dict:
     """
     Embed user messages from a specific conversation.
     
     This function:
-    1. Fetches user messages for the conversation
-    2. Filters and normalizes messages
-    3. Chunks long messages (>500 chars)
-    4. Generates embeddings for each chunk
-    5. Stores embeddings in wb_embeddings table (with idempotence check)
+    1. Fetches user_id from conversation_id (if not provided)
+    2. Validates conversation ownership (if user_id provided)
+    3. Fetches user messages for the conversation
+    4. Filters and normalizes messages
+    5. Chunks long messages (>500 chars)
+    6. Generates embeddings for each chunk
+    7. Stores embeddings in wb_embeddings table (with idempotence check)
     
     Args:
-        user_id: UUID of the user
         conversation_id: UUID of the conversation
+        user_id: Optional UUID of the user. If not provided, will be fetched from conversation.
+                 If provided, will validate that conversation belongs to this user.
         model_tag: Model tag for embeddings ('miniLM' or 'e5'), default 'e5'
     
     Returns:
@@ -239,18 +242,33 @@ def embed_conversation_messages(user_id: str, conversation_id: str, model_tag: s
             "messages_processed": int,
             "chunks_created": int,
             "embeddings_stored": int,
-            "messages_skipped": int
+            "messages_skipped": int,
+            "user_id": str  # The user_id used (from conversation)
         }
     
     Raises:
-        ValueError: If no messages found or invalid model_tag
+        ValueError: If no messages found, invalid model_tag, or conversation/user mismatch
     """
     if model_tag not in ['miniLM', 'e5']:
         raise ValueError(f"Invalid model_tag: {model_tag}. Must be 'miniLM' or 'e5'")
     
-    # Load messages for this conversation
+    # Get user_id from conversation if not provided
+    if user_id is None:
+        user_id = database.get_conversation_user_id(conversation_id)
+        logger.info(f"Fetched user_id {user_id} from conversation {conversation_id}")
+    else:
+        # Validate conversation ownership
+        conv_user_id = database.get_conversation_user_id(conversation_id)
+        if conv_user_id != user_id:
+            raise ValueError(
+                f"Conversation {conversation_id} belongs to user {conv_user_id}, "
+                f"not {user_id}"
+            )
+        logger.info(f"Validated conversation {conversation_id} belongs to user {user_id}")
+    
+    # Load messages for this conversation (with validation)
     logger.info(f"Loading messages for conversation {conversation_id} (user {user_id})")
-    messages = database.load_conversation_messages(conversation_id)
+    messages = database.load_conversation_messages(conversation_id, user_id=user_id)
     
     if not messages:
         logger.warning(f"No messages found for conversation {conversation_id}")
@@ -353,6 +371,7 @@ def embed_conversation_messages(user_id: str, conversation_id: str, model_tag: s
         "messages_processed": messages_processed,
         "chunks_created": chunks_created,
         "embeddings_stored": embeddings_stored,
-        "messages_skipped": messages_skipped
+        "messages_skipped": messages_skipped,
+        "user_id": user_id  # Return the user_id used (from conversation)
     }
 

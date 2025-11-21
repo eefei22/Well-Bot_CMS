@@ -17,6 +17,7 @@ from intervention.models import (
 class ProcessContextRequest(BaseModel):
     """Request model for processing user context."""
     user_id: str
+    conversation_id: Optional[str] = None
 
 
 class ProcessContextResponse(BaseModel):
