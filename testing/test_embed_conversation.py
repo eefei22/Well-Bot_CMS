@@ -67,18 +67,19 @@ def add_test_messages(conversation_id: str, messages: list[str]) -> bool:
         return False
 
 
-def verify_messages(conversation_id: str) -> int:
+def verify_messages(conversation_id: str, user_id: str = None) -> int:
     """
     Verify messages exist in the conversation.
     
     Args:
         conversation_id: UUID of the conversation
+        user_id: Optional user_id for validation
     
     Returns:
         Number of user messages found
     """
     try:
-        messages = database.load_conversation_messages(conversation_id)
+        messages = database.load_conversation_messages(conversation_id, user_id=user_id)
         count = len(messages)
         print(f"✓ Found {count} user messages in conversation")
         return count
@@ -87,12 +88,13 @@ def verify_messages(conversation_id: str) -> int:
         return 0
 
 
-def verify_embeddings(conversation_id: str, model_tag: str = 'e5') -> int:
+def verify_embeddings(conversation_id: str, user_id: str = None, model_tag: str = 'e5') -> int:
     """
     Verify embeddings exist for messages in the conversation.
     
     Args:
         conversation_id: UUID of the conversation
+        user_id: Optional user_id for validation
         model_tag: Model tag to check
     
     Returns:
@@ -102,7 +104,7 @@ def verify_embeddings(conversation_id: str, model_tag: str = 'e5') -> int:
         client = database.get_supabase_client()
         
         # Get all message IDs for this conversation
-        messages = database.load_conversation_messages(conversation_id)
+        messages = database.load_conversation_messages(conversation_id, user_id=user_id)
         message_ids = [msg.get("id") for msg in messages]
         
         if not message_ids:
@@ -148,19 +150,8 @@ def get_user_id_from_conversation(conversation_id: str) -> str:
         User ID or None if not found
     """
     try:
-        client = database.get_supabase_client()
-        
-        response = client.table("wb_conversation")\
-            .select("user_id")\
-            .eq("id", conversation_id)\
-            .single()\
-            .execute()
-        
-        if response.data:
-            return response.data.get("user_id")
-        return None
-        
-    except Exception as e:
+        return database.get_conversation_user_id(conversation_id)
+    except ValueError as e:
         print(f"Warning: Could not get user_id from conversation: {e}")
         return None
 
@@ -228,7 +219,7 @@ def main():
     # Step 2: Verify messages exist
     print("\nStep 2: Verify messages")
     print("-" * 80)
-    message_count = verify_messages(conversation_id)
+    message_count = verify_messages(conversation_id, user_id=user_id)
     
     if message_count == 0:
         print("No messages found. Cannot proceed with embedding.")
@@ -240,7 +231,7 @@ def main():
     print("Embedding messages with e5 model...")
     
     try:
-        result = embed_conversation_messages(user_id, conversation_id, model_tag='e5')
+        result = embed_conversation_messages(conversation_id, user_id=user_id, model_tag='e5')
         
         print("\nEmbedding Results:")
         print(f"  Messages processed: {result['messages_processed']}")
@@ -262,7 +253,7 @@ def main():
     # Step 4: Verify embeddings
     print("\nStep 4: Verify embeddings")
     print("-" * 80)
-    embedding_count = verify_embeddings(conversation_id, model_tag='e5')
+    embedding_count = verify_embeddings(conversation_id, user_id=user_id, model_tag='e5')
     
     # Summary
     print("\n" + "=" * 80)
