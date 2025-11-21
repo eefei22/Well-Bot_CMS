@@ -1,6 +1,6 @@
 # py -3.12 -m venv venv
 # .\venv\Scripts\Activate.ps1
-# pip install -r requirements.txt
+# python -m pip install -r requirements.txt
 
 # FastAPI and server
 fastapi==0.109.0
@@ -25,4 +25,8 @@ tzdata>=2024.1
 
 # Testing
 requests==2.31.0
+
+# Embeddings
+sentence-transformers>=2.2.0
+torch>=2.0.0
 

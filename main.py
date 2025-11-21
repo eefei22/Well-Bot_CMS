@@ -50,68 +50,155 @@ async def process_user_context(request: schemas.ProcessContextRequest):
     Process user messages and generate both persona facts and daily life context.
     
     This endpoint:
+    0. Embeds new conversation messages (if conversation_id provided)
     1. Extracts persona facts (communication style, interests, personality traits, etc.)
     2. Extracts daily life context (stories, routines, relationships, work, etc.)
     3. Saves both to the users_context_bundle table
     
     Args:
-        request: ProcessContextRequest containing user_id
+        request: ProcessContextRequest containing user_id and optional conversation_id
     
     Returns:
         ProcessContextResponse with facts and persona_summary
     """
     start_time = datetime.now()
-    logger.info(f"POST /api/context/process - Endpoint called at {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
-    logger.info(f"  User ID: {request.user_id}")
+    logger.info("=" * 60)
+    logger.info("=== REQUEST RECEIVED ===")
+    logger.info(f"User ID: {request.user_id}")
+    if request.conversation_id:
+        logger.info(f"Conversation ID: {request.conversation_id}")
+    else:
+        logger.info("Conversation ID: None (skipping incremental embedding)")
+    logger.info(f"Timestamp: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info("=" * 60)
+    
+    # Determine the actual user_id to use
+    # If conversation_id is provided, fetch user_id from conversation (source of truth)
+    # Otherwise, use the provided user_id
+    actual_user_id = request.user_id
+    if request.conversation_id:
+        try:
+            actual_user_id = database.get_conversation_user_id(request.conversation_id)
+            logger.info("")
+            logger.info(f"[Validation] Conversation {request.conversation_id} belongs to user {actual_user_id}")
+            if actual_user_id != request.user_id:
+                logger.warning(
+                    f"[Validation] Mismatch detected: Request user_id ({request.user_id}) "
+                    f"does not match conversation owner ({actual_user_id}). "
+                    f"Using conversation owner ({actual_user_id}) as source of truth."
+                )
+        except ValueError as e:
+            logger.error(f"[Validation] Failed to get user_id from conversation: {e}")
+            raise HTTPException(status_code=400, detail=str(e))
+    
+    # Track durations for final summary
+    embed_duration = 0.0
+    facts_duration = 0.0
+    context_duration = 0.0
+    embed_result = None
+    facts = None
+    persona_summary = None
     
     try:
-        # Step 1: Query and preprocess messages (single database query)
-        preprocess_start = datetime.now()
-        logger.info(f"  Starting message preprocessing at {preprocess_start.strftime('%H:%M:%S')}")
-        try:
-            preprocessed_messages = message_preprocessor.preprocess_user_messages(request.user_id)
-            preprocess_end = datetime.now()
-            preprocess_duration = (preprocess_end - preprocess_start).total_seconds()
-            logger.info(f"  Message preprocessing completed at {preprocess_end.strftime('%H:%M:%S')} (took {preprocess_duration:.2f}s)")
-        except Exception as e:
-            preprocess_end = datetime.now()
-            preprocess_duration = (preprocess_end - preprocess_start).total_seconds()
-            logger.error(f"  Message preprocessing failed at {preprocess_end.strftime('%H:%M:%S')} after {preprocess_duration:.2f}s: {e}")
-            raise  # Preprocessing failure blocks both extractions
+        # Step 0: Embed new conversation messages (if conversation_id provided)
+        if request.conversation_id:
+            embed_start = datetime.now()
+            logger.info("")
+            logger.info("[Step 0] Embedding Messages")
+            logger.info(f"  Conversation: {request.conversation_id}")
+            logger.info(f"  User: {actual_user_id}")
+            try:
+                embed_result = message_preprocessor.embed_conversation_messages(
+                    conversation_id=request.conversation_id,
+                    user_id=actual_user_id  # Pass for validation
+                )
+                embed_end = datetime.now()
+                embed_duration = (embed_end - embed_start).total_seconds()
+                logger.info(f"  → Messages processed: {embed_result.get('messages_processed', 0)}")
+                logger.info(f"  → Chunks created: {embed_result.get('chunks_created', 0)}")
+                logger.info(f"  → Embeddings stored: {embed_result.get('embeddings_stored', 0)}")
+                logger.info(f"  → Messages skipped: {embed_result.get('messages_skipped', 0)}")
+                logger.info(f"  ✓ Completed in {embed_duration:.2f}s")
+            except Exception as e:
+                embed_end = datetime.now()
+                embed_duration = (embed_end - embed_start).total_seconds()
+                logger.error(f"  ✗ Failed after {embed_duration:.2f}s: {e}")
+                # Don't raise - continue with extraction even if embedding fails
+                # (old embeddings will still be queried)
+        else:
+            logger.info("")
+            logger.info("[Step 0] Embedding Messages")
+            logger.info("  → Skipped (no conversation_id provided)")
         
-        # Step 2: Extract persona facts
-        facts = None
+        # Step 1: Extract persona facts (using semantic vector search)
         facts_start = datetime.now()
-        logger.info(f"  Starting facts extraction at {facts_start.strftime('%H:%M:%S')}")
+        logger.info("")
+        logger.info("[Step 1] Extracting Persona Facts")
+        logger.info(f"  User: {actual_user_id}")
+        logger.info("  → Queried 6 focus areas (communication style, interests, personality traits, values, characteristics, behavioural patterns)")
         try:
-            facts = facts_extractor.extract_user_facts(request.user_id, preprocessed_messages)
+            facts = facts_extractor.extract_user_facts(actual_user_id)
             facts_end = datetime.now()
             facts_duration = (facts_end - facts_start).total_seconds()
-            logger.info(f"  Facts extraction completed at {facts_end.strftime('%H:%M:%S')} (took {facts_duration:.2f}s)")
+            facts_length = len(facts) if facts else 0
+            facts_preview = facts[:200] + "..." if facts and len(facts) > 200 else (facts if facts else "")
+            logger.info(f"  → Facts summary: {facts_length:,} characters")
+            if facts_preview:
+                logger.info(f"  → Preview: {facts_preview}")
+            logger.info(f"  ✓ Completed in {facts_duration:.2f}s")
         except Exception as e:
             facts_end = datetime.now()
             facts_duration = (facts_end - facts_start).total_seconds()
-            logger.error(f"  Facts extraction failed at {facts_end.strftime('%H:%M:%S')} after {facts_duration:.2f}s: {e}")
+            logger.error(f"  ✗ Failed after {facts_duration:.2f}s: {e}")
             # Don't raise - allow context extraction to proceed
         
-        # Step 3: Extract daily life context
-        persona_summary = None
+        # Step 2: Extract daily life context (using semantic vector search)
         context_start = datetime.now()
-        logger.info(f"  Starting context extraction at {context_start.strftime('%H:%M:%S')}")
+        logger.info("")
+        logger.info("[Step 2] Extracting Daily Life Context")
+        logger.info(f"  User: {actual_user_id}")
+        logger.info("  → Queried 6 focus areas (routines, stories, relationships, work, events, activities)")
         try:
-            persona_summary = context_extractor.process_user_context(request.user_id, preprocessed_messages)
+            persona_summary = context_extractor.process_user_context(actual_user_id)
             context_end = datetime.now()
             context_duration = (context_end - context_start).total_seconds()
-            logger.info(f"  Context extraction completed at {context_end.strftime('%H:%M:%S')} (took {context_duration:.2f}s)")
+            context_length = len(persona_summary) if persona_summary else 0
+            context_preview = persona_summary[:200] + "..." if persona_summary and len(persona_summary) > 200 else (persona_summary if persona_summary else "")
+            logger.info(f"  → Context summary: {context_length:,} characters")
+            if context_preview:
+                logger.info(f"  → Preview: {context_preview}")
+            logger.info(f"  ✓ Completed in {context_duration:.2f}s")
         except Exception as e:
             context_end = datetime.now()
             context_duration = (context_end - context_start).total_seconds()
-            logger.error(f"  Context extraction failed at {context_end.strftime('%H:%M:%S')} after {context_duration:.2f}s: {e}")
+            logger.error(f"  ✗ Failed after {context_duration:.2f}s: {e}")
             raise
         
         end_time = datetime.now()
         total_duration = (end_time - start_time).total_seconds()
-        logger.info(f"POST /api/context/process - Completed at {end_time.strftime('%Y-%m-%d %H:%M:%S')} (total: {total_duration:.2f}s)")
+        
+        # Determine overall status
+        facts_success = facts is not None
+        context_success = persona_summary is not None
+        
+        if facts_success and context_success:
+            overall_status = "Success"
+        elif facts_success or context_success:
+            overall_status = "Partial Success"
+        else:
+            overall_status = "Failure"
+        
+        logger.info("")
+        logger.info("=" * 60)
+        logger.info("=== PROCESSING COMPLETE ===")
+        logger.info(f"Status: {overall_status}")
+        logger.info(f"Extracted: Facts {'✓' if facts_success else '✗'} | Context {'✓' if context_success else '✗'}")
+        logger.info(f"Total duration: {total_duration:.2f}s")
+        if embed_duration > 0:
+            logger.info(f"  - Embedding: {embed_duration:.2f}s")
+        logger.info(f"  - Facts extraction: {facts_duration:.2f}s")
+        logger.info(f"  - Context extraction: {context_duration:.2f}s")
+        logger.info("=" * 60)
         
         return schemas.ProcessContextResponse(
             status="success",
@@ -122,12 +209,27 @@ async def process_user_context(request: schemas.ProcessContextRequest):
     except ValueError as e:
         end_time = datetime.now()
         total_duration = (end_time - start_time).total_seconds()
-        logger.error(f"POST /api/context/process - ValueError at {end_time.strftime('%H:%M:%S')} after {total_duration:.2f}s: {e}")
+        logger.error("")
+        logger.error("=" * 60)
+        logger.error("=== PROCESSING FAILED ===")
+        logger.error(f"Error Type: ValueError")
+        logger.error(f"Error: {e}")
+        logger.error(f"Total duration: {total_duration:.2f}s")
+        logger.error("=" * 60)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         end_time = datetime.now()
         total_duration = (end_time - start_time).total_seconds()
-        logger.error(f"POST /api/context/process - Exception at {end_time.strftime('%H:%M:%S')} after {total_duration:.2f}s: {e}")
+        logger.error("")
+        logger.error("=" * 60)
+        logger.error("=== PROCESSING FAILED ===")
+        logger.error(f"Error Type: {type(e).__name__}")
+        logger.error(f"Error: {e}")
+        logger.error(f"Total duration: {total_duration:.2f}s")
+        # Log partial success if any step completed
+        if facts_duration > 0 or context_duration > 0:
+            logger.error(f"Partial results: Facts {'✓' if facts is not None else '✗'} | Context {'✓' if persona_summary is not None else '✗'}")
+        logger.error("=" * 60)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
