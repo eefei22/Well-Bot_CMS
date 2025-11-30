@@ -13,13 +13,12 @@ from datetime import datetime
 class SuggestionRequest(BaseModel):
     """Request model for intervention suggestion endpoint."""
     user_id: str
-    context_time_of_day: Optional[str] = None  # 'morning', 'afternoon', 'evening', 'night'
 
 
 class RankedActivity(BaseModel):
     """Model for a ranked activity suggestion."""
     activity_type: str  # 'journal', 'gratitude', 'meditation', 'quote'
-    rank: int  # 1-5 (1 is best)
+    rank: int  # 1-4 (1 is best)
     score: float  # Strength of suggestion (0.0 to 1.0)
 
 
@@ -32,7 +31,7 @@ class DecisionResult(BaseModel):
 
 class SuggestionResult(BaseModel):
     """Result from suggestion engine (activity recommendations)."""
-    ranked_activities: List[RankedActivity]  # All activities ranked 1-5
+    ranked_activities: List[RankedActivity]  # All activities ranked 1-4
     reasoning: Optional[str] = None  # Optional reasoning for the suggestions
 
 
