@@ -29,4 +29,5 @@ requests==2.31.0
 # Embeddings
 sentence-transformers>=2.2.0
 torch>=2.0.0
+langdetect>=1.0.9
 
