@@ -11,6 +11,7 @@ This module orchestrates the complete intervention suggestion flow:
 from typing import Optional
 import logging
 from datetime import datetime
+import uuid
 
 from utils import database
 from intervention.decision_engine import decide_trigger_intervention
@@ -25,58 +26,25 @@ from intervention.models import (
 
 logger = logging.getLogger(__name__)
 
+# Valid emotion labels
+VALID_EMOTION_LABELS = ['Sad', 'Angry', 'Happy', 'Fear']
 
-def get_time_of_day_context(timestamp: datetime) -> str:
+
+def validate_suggestion_request(request: SuggestionRequest) -> None:
     """
-    Derive time of day context from timestamp using Malaysian timezone (UTC+8).
-    
-    Time periods:
-    - morning: 5:00 - 11:59
-    - afternoon: 12:00 - 16:59
-    - evening: 17:00 - 20:59
-    - night: 21:00 - 4:59
+    Validate suggestion request input parameters.
     
     Args:
-        timestamp: Datetime object (assumed UTC+8 if timezone-naive, since database stores in UTC+8)
+        request: SuggestionRequest to validate
     
-    Returns:
-        One of: 'morning', 'afternoon', 'evening', 'night'
+    Raises:
+        ValueError: If validation fails with clear error message
     """
-    from datetime import timezone, timedelta
-    
-    # Try zoneinfo first (requires tzdata package on Windows)
-    MALAYSIA_TZ = None
+    # Validate user_id is a valid UUID
     try:
-        from zoneinfo import ZoneInfo
-        MALAYSIA_TZ = ZoneInfo("Asia/Kuala_Lumpur")
-    except (ImportError, Exception):
-        # ZoneInfoNotFoundError, ImportError, or other issues - fall back to pytz
-        try:
-            import pytz
-            MALAYSIA_TZ = pytz.timezone("Asia/Kuala_Lumpur")
-        except ImportError:
-            # Final fallback: manual UTC+8 offset
-            MALAYSIA_TZ = timezone(timedelta(hours=8))
-    
-    # Convert to Malaysian timezone
-    # If timezone-naive, assume it's UTC+8 (database timezone), not UTC
-    if timestamp.tzinfo is None:
-        timestamp = timestamp.replace(tzinfo=MALAYSIA_TZ)
-    else:
-        # If it has timezone info, convert to UTC+8
-        timestamp = timestamp.astimezone(MALAYSIA_TZ)
-    
-    timestamp_malaysia = timestamp
-    hour = timestamp_malaysia.hour
-    
-    if 5 <= hour < 12:
-        return 'morning'
-    elif 12 <= hour < 17:
-        return 'afternoon'
-    elif 17 <= hour < 21:
-        return 'evening'
-    else:  # 21 <= hour < 5
-        return 'night'
+        uuid.UUID(request.user_id)
+    except (ValueError, TypeError):
+        raise ValueError(f"Invalid user_id format: '{request.user_id}'. Must be a valid UUID.")
 
 
 def process_suggestion_request(request: SuggestionRequest) -> SuggestionResponse:
@@ -85,10 +53,10 @@ def process_suggestion_request(request: SuggestionRequest) -> SuggestionResponse
     
     This orchestrates the complete flow:
     1. Fetch latest emotion from database
-    2. Fetch user data from database (emotion logs, activity logs, preferences)
+    2. Fetch user data from database (emotion logs, preferences, activity counts)
     3. Calculate time since last activity
     4. Call decision engine for kick-start decision
-    5. Call suggestion engine for activity recommendations
+    5. Call suggestion engine for activity recommendations (with frequency-based multipliers)
     6. Return structured response
     
     Args:
@@ -100,6 +68,9 @@ def process_suggestion_request(request: SuggestionRequest) -> SuggestionResponse
     logger.info(f"Processing suggestion request for user {request.user_id}")
     
     try:
+        # Validate request input
+        validate_suggestion_request(request)
+        
         # 1. Fetch latest emotion from database
         logger.debug("Fetching latest emotion from database...")
         latest_emotion = database.get_latest_emotion_log(request.user_id)
@@ -113,6 +84,10 @@ def process_suggestion_request(request: SuggestionRequest) -> SuggestionResponse
         if not emotion_label or confidence_score is None or not emotion_timestamp_str:
             raise ValueError(f"Invalid emotion log data for user {request.user_id}: missing required fields")
         
+        # Validate emotion_label
+        if emotion_label not in VALID_EMOTION_LABELS:
+            raise ValueError(f"Invalid emotion_label: '{emotion_label}'. Must be one of: {', '.join(VALID_EMOTION_LABELS)}")
+        
         # Parse timestamp string to datetime if needed (database stores in UTC+8)
         if isinstance(emotion_timestamp_str, str):
             emotion_timestamp = database.parse_database_timestamp(emotion_timestamp_str)
@@ -124,18 +99,12 @@ def process_suggestion_request(request: SuggestionRequest) -> SuggestionResponse
         # 2. Fetch other user data from database
         logger.debug("Fetching other user data from database...")
         recent_emotion_logs = database.fetch_recent_emotion_logs(request.user_id, hours=48)
-        recent_activity_logs = database.fetch_recent_activity_logs(request.user_id, hours=24)
         user_preferences = database.fetch_user_preferences(request.user_id)
         time_since_last_activity = database.get_time_since_last_activity(request.user_id)
+        activity_counts = database.get_activity_counts(request.user_id, days=30)
         
-        logger.debug(f"Fetched {len(recent_emotion_logs)} emotion logs, {len(recent_activity_logs)} activity logs")
-        
-        # 3. Determine time of day context
-        time_of_day = request.context_time_of_day
-        if not time_of_day:
-            time_of_day = get_time_of_day_context(emotion_timestamp)
-        
-        logger.debug(f"Time of day context: {time_of_day}")
+        logger.debug(f"Fetched {len(recent_emotion_logs)} emotion logs")
+        logger.debug(f"Activity counts (last 30 days): {activity_counts}")
         
         # 4. Call decision engine with fetched emotion
         logger.debug("Calling decision engine...")
@@ -156,8 +125,7 @@ def process_suggestion_request(request: SuggestionRequest) -> SuggestionResponse
         ranked_activities_list, suggestion_reasoning = suggest_activities(
             emotion_label=emotion_label,
             user_preferences=user_preferences,
-            recent_activity_logs=recent_activity_logs,
-            time_of_day=time_of_day
+            activity_counts=activity_counts
         )
         
         # Convert to RankedActivity models
