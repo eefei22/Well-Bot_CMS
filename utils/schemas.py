@@ -27,3 +27,12 @@ class ProcessContextResponse(BaseModel):
     facts: Optional[str] = None
     persona_summary: Optional[str] = None
 
+
+class GenerateTitleRequest(BaseModel):
+    """Request model for generating journal title."""
+    body: str
+
+
+class GenerateTitleResponse(BaseModel):
+    """Response model for generating journal title."""
+    title: str
