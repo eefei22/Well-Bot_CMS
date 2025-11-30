@@ -11,7 +11,7 @@ from datetime import datetime
 
 # Import modules
 from utils import database, schemas
-from context_generator import context_extractor, facts_extractor, message_preprocessor
+from context_generator import context_extractor, facts_extractor, message_preprocessor, title_generator
 from intervention import intervention
 
 # Setup logging with timestamps
@@ -309,6 +309,53 @@ async def intervention_health():
             "error": str(e),
             "timestamp": datetime.now().isoformat()
         }
+
+
+@app.post("/api/journal/generate-title", response_model=schemas.GenerateTitleResponse)
+async def generate_journal_title(request: schemas.GenerateTitleRequest):
+    """
+    Generate a meaningful, concise title for a journal entry.
+    
+    This endpoint:
+    1. Accepts journal body text
+    2. Uses LLM to generate a title that meaningfully describes the content
+    3. Returns the generated title in the same language as the journal content
+    
+    Args:
+        request: GenerateTitleRequest containing journal body text
+    
+    Returns:
+        GenerateTitleResponse with generated title
+    """
+    start_time = datetime.now()
+    logger.info(f"POST /api/journal/generate-title - Endpoint called at {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
+    logger.info(f"  Body length: {len(request.body)} chars")
+    
+    try:
+        # Validate request
+        if not request.body or not request.body.strip():
+            raise HTTPException(status_code=400, detail="Journal body cannot be empty")
+        
+        # Generate title using title generator
+        generated_title = title_generator.generate_journal_title(request.body)
+        
+        end_time = datetime.now()
+        total_duration = (end_time - start_time).total_seconds()
+        logger.info(f"POST /api/journal/generate-title - Completed at {end_time.strftime('%Y-%m-%d %H:%M:%S')} (total: {total_duration:.2f}s)")
+        logger.info(f"  Generated title: '{generated_title}'")
+        
+        return schemas.GenerateTitleResponse(title=generated_title)
+        
+    except ValueError as e:
+        end_time = datetime.now()
+        total_duration = (end_time - start_time).total_seconds()
+        logger.error(f"POST /api/journal/generate-title - ValueError at {end_time.strftime('%H:%M:%S')} after {total_duration:.2f}s: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        end_time = datetime.now()
+        total_duration = (end_time - start_time).total_seconds()
+        logger.error(f"POST /api/journal/generate-title - Exception at {end_time.strftime('%H:%M:%S')} after {total_duration:.2f}s: {e}")
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 if __name__ == "__main__":
