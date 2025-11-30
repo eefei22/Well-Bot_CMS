@@ -243,7 +243,7 @@ async def suggest_intervention(request: schemas.SuggestionRequest):
     2. Fetches latest emotion from database for the user
     3. Fetches recent emotion logs and activity history for the user
     4. Determines if an intervention should be triggered (kick-start decision)
-    5. Generates ranked activity suggestions (1-5) with scores
+    5. Generates ranked activity suggestions (1-4) with scores
     6. Returns both the decision and suggestions
     
     Args:

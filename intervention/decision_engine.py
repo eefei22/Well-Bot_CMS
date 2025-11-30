@@ -8,12 +8,18 @@ whether an intervention should be triggered.
 from typing import Optional, Tuple
 import logging
 
+from intervention.config_loader import load_config
+
 logger = logging.getLogger(__name__)
 
-# Configuration constants
-NEGATIVE_EMOTIONS = ['Sad', 'Angry', 'Fear']
-CONFIDENCE_THRESHOLD = 0.70
-MIN_TIME_SINCE_LAST_ACTIVITY_MINUTES = 60.0
+# Load configuration
+_config = load_config()
+_decision_config = _config.get("decision_engine", {})
+
+# Configuration constants (from config file with fallback defaults)
+NEGATIVE_EMOTIONS = _decision_config.get("negative_emotions", ['Sad', 'Angry', 'Fear'])
+CONFIDENCE_THRESHOLD = _decision_config.get("confidence_threshold", 0.70)
+MIN_TIME_SINCE_LAST_ACTIVITY_MINUTES = _decision_config.get("min_time_since_last_activity_minutes", 60.0)
 
 
 def decide_trigger_intervention(
