@@ -597,6 +597,58 @@ def get_all_users() -> List[str]:
         return []
 
 
+def get_activity_counts(user_id: str, days: int = 30) -> Dict[str, int]:
+    """
+    Get activity counts for a user from the intervention_log table for the last N days.
+    Database timestamps are stored in UTC+8 (timezone-naive).
+    
+    Args:
+        user_id: UUID of the user
+        days: Number of days to look back (default: 30)
+    
+    Returns:
+        Dictionary with activity type as key and count as value.
+        Example: {'journal': 15, 'gratitude': 8, 'meditation': 12, 'quote': 5}
+        Returns empty dict or zeros if no activities found.
+    """
+    try:
+        client = get_supabase_client()
+        from datetime import timedelta
+        
+        # Calculate cutoff time (days ago from now) in UTC+8
+        cutoff_time = get_current_time_utc8() - timedelta(days=days)
+        
+        # Query intervention_log table for last N days
+        response = client.table("intervention_log")\
+            .select("intervention_type")\
+            .eq("user_id", user_id)\
+            .gte("timestamp", cutoff_time.isoformat())\
+            .execute()
+        
+        # Initialize counts for all activity types
+        activity_counts = {
+            'journal': 0,
+            'gratitude': 0,
+            'meditation': 0,
+            'quote': 0
+        }
+        
+        # Count occurrences of each activity type
+        if response.data:
+            for log in response.data:
+                activity_type = log.get('intervention_type')
+                if activity_type in activity_counts:
+                    activity_counts[activity_type] += 1
+        
+        logger.info(f"Activity counts for user {user_id} (last {days} days): {activity_counts}")
+        return activity_counts
+        
+    except Exception as e:
+        logger.error(f"Failed to get activity counts for user {user_id}: {e}")
+        # Return zeros on error
+        return {'journal': 0, 'gratitude': 0, 'meditation': 0, 'quote': 0}
+
+
 def get_time_since_last_activity(user_id: str) -> float:
     """
     Calculate the time (in minutes) since the last activity for a user.

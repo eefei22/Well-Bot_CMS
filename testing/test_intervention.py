@@ -127,7 +127,7 @@ def test_decision_engine(emotion_label="Sad", confidence_score=0.85, time_since_
         return None, None, None
 
 
-def test_suggestion_engine(emotion_label="Sad", preferences=None, activity_logs=None, time_of_day="evening"):
+def test_suggestion_engine(emotion_label="Sad", preferences=None, activity_counts=None):
     """Test 3: Suggestion engine computation"""
     print("=" * 80)
     print("TEST 3: SUGGESTION ENGINE")
@@ -145,20 +145,24 @@ def test_suggestion_engine(emotion_label="Sad", preferences=None, activity_logs=
                 "journaling": True
             }
         
-        if activity_logs is None:
-            activity_logs = []
+        if activity_counts is None:
+            # Default test counts: journal is most frequent, quote is least
+            activity_counts = {
+                'journal': 15,
+                'gratitude': 8,
+                'meditation': 12,
+                'quote': 5
+            }
         
         print(f"\nTesting with:")
         print(f"  - Emotion: {emotion_label}")
         print(f"  - Preferences: {json.dumps(preferences, indent=2)}")
-        print(f"  - Recent activities: {len(activity_logs)}")
-        print(f"  - Time of day: {time_of_day}")
+        print(f"  - Activity counts: {activity_counts}")
         
         ranked_activities, reasoning = suggest_activities(
             emotion_label=emotion_label,
             user_preferences=preferences,
-            recent_activity_logs=activity_logs,
-            time_of_day=time_of_day
+            activity_counts=activity_counts
         )
         
         print(f"\n✓ Suggestions computed:")
@@ -454,11 +458,12 @@ def main():
     )
     
     # Test 3: Suggestion engine
+    # Get activity counts from database for testing
+    activity_counts = database.get_activity_counts(DEV_USER_ID, days=30)
     test_suggestion_engine(
         emotion_label="Sad",
         preferences=preferences,
-        activity_logs=activity_logs,
-        time_of_day="evening"
+        activity_counts=activity_counts
     )
     
     # Test 4: Full flow

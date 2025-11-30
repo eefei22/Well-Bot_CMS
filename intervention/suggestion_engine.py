@@ -4,72 +4,45 @@ Suggestion Engine
 This module implements the activity recommendation algorithm to determine
 which activities to suggest and in what order.
 """
-# TODO: ADJUST LOGIC TO ACCOUNT FOR FREQUENCY OF ACTIVITIES, AND USER PREFERENCES
 
 from typing import List, Dict, Optional, Tuple
 import logging
 
+from intervention.config_loader import load_config
+
 logger = logging.getLogger(__name__)
 
-# Available activity types
-ACTIVITY_TYPES = ['journal', 'gratitude', 'meditation', 'quote']
+# Load configuration
+_config = load_config()
+_suggestion_config = _config.get("suggestion_engine", {})
+
+# Available activity types (from config with fallback)
+ACTIVITY_TYPES = _suggestion_config.get("activity_types", ['journal', 'gratitude', 'meditation', 'quote'])
 
 # Base emotion-to-activity mapping weights (0.0 to 1.0)
-# Higher weight = better match for that emotion
+# Higher weight = better match for that emotion (from config with fallback)
+_emotion_weights_config = _suggestion_config.get("emotion_activity_weights", {})
 EMOTION_ACTIVITY_WEIGHTS = {
-    'Sad': {
-        'journal': 0.9,
-        'meditation': 0.8,
-        'gratitude': 0.7,
-        'quote': 0.6
-    },
-    'Angry': {
-        'meditation': 0.9,
-        'journal': 0.7,
-        'quote': 0.6,
-        'gratitude': 0.5
-    },
-    'Fear': {
-        'meditation': 0.8,
-        'quote': 0.7, 
-        'journal': 0.7, 
-        'gratitude': 0.6  
-    },
-    'Happy': {
-        'gratitude': 0.8, 
-        'journal': 0.7, 
-        'quote': 0.6, 
-        'meditation': 0.5 
-    }
+    'Sad': _emotion_weights_config.get('Sad', {'journal': 0.9, 'meditation': 0.8, 'gratitude': 0.7, 'quote': 0.6}),
+    'Angry': _emotion_weights_config.get('Angry', {'meditation': 0.9, 'journal': 0.7, 'quote': 0.6, 'gratitude': 0.5}),
+    'Fear': _emotion_weights_config.get('Fear', {'meditation': 0.8, 'quote': 0.7, 'journal': 0.7, 'gratitude': 0.6}),
+    'Happy': _emotion_weights_config.get('Happy', {'gratitude': 0.8, 'journal': 0.7, 'quote': 0.6, 'meditation': 0.5})
 }
 
-# Time-of-day adjustments (multipliers)
-TIME_OF_DAY_ADJUSTMENTS = {
-    'morning': {
-        'journal': 0.8,
-        'gratitude': 0.9,
-        'meditation': 0.7,
-        'quote': 0.8
-    },
-    'afternoon': {
-        'journal': 0.7,
-        'gratitude': 0.8,
-        'meditation': 0.8,
-        'quote': 0.9
-    },
-    'evening': {
-        'journal': 0.9,
-        'meditation': 0.9,
-        'gratitude': 0.7,
-        'quote': 0.8
-    },
-    'night': {
-        'journal': 0.9,
-        'meditation': 0.8,
-        'gratitude': 0.6,
-        'quote': 0.7
-    }
+# Frequency-based multipliers (based on relative usage frequency)
+# Most frequent activity gets highest multiplier, least frequent gets lowest (from config with fallback)
+_frequency_multipliers_config = _suggestion_config.get("frequency_multipliers", {})
+FREQUENCY_MULTIPLIERS = {
+    1: _frequency_multipliers_config.get("1", 1.3),
+    2: _frequency_multipliers_config.get("2", 1.2),
+    3: _frequency_multipliers_config.get("3", 1.1),
+    4: _frequency_multipliers_config.get("4", 1.05)
 }
+
+# Preference multipliers (from config with fallback)
+_preference_multipliers_config = _suggestion_config.get("preference_multipliers", {})
+PREFERRED_MULTIPLIER = _preference_multipliers_config.get("preferred", 1.2)
+NOT_PREFERRED_MULTIPLIER = _preference_multipliers_config.get("not_preferred", 0.7)
 
 # Preference field mapping (from users.prefer_intervention to activity types)
 PREFERENCE_MAPPING = {
@@ -83,21 +56,20 @@ PREFERENCE_MAPPING = {
 def suggest_activities(
     emotion_label: str,
     user_preferences: Dict,
-    recent_activity_logs: List[Dict],
-    time_of_day: Optional[str] = None
+    activity_counts: Dict[str, int]
 ) -> Tuple[List[Dict], Optional[str]]:
     """
-    Suggest activities ranked 1-5 with scores and reasoning.
+    Suggest activities ranked 1-4 with scores and reasoning.
     
     Args:
         emotion_label: Current emotion label ('Angry', 'Sad', 'Happy', 'Fear')
         user_preferences: Dictionary from users.prefer_intervention JSONB field
-        recent_activity_logs: List of recent activity log dictionaries
-        time_of_day: Optional time of day context ('morning', 'afternoon', 'evening', 'night')
+        activity_counts: Dictionary with activity type as key and count as value
+                         Example: {'journal': 15, 'gratitude': 8, 'meditation': 12, 'quote': 5}
     
     Returns:
         Tuple of (ranked_activities: List[Dict], reasoning: Optional[str])
-        - ranked_activities: List of dicts with 'activity_type', 'rank' (1-5), 'score' (0.0-1.0)
+        - ranked_activities: List of dicts with 'activity_type', 'rank' (1-4), 'score' (0.0-1.0)
         - reasoning: Optional string explaining the suggestions
     """
     # Initialize base scores from emotion mapping
@@ -116,22 +88,36 @@ def suggest_activities(
         activity_type = PREFERENCE_MAPPING.get(pref_key)
         if activity_type and activity_type in activity_scores:
             if pref_value:  # User prefers this activity
-                activity_scores[activity_type] *= 1.2  # Boost by 20%
+                activity_scores[activity_type] *= PREFERRED_MULTIPLIER
             else:  # User doesn't prefer this activity
-                activity_scores[activity_type] *= 0.7  # Reduce by 30%
+                activity_scores[activity_type] *= NOT_PREFERRED_MULTIPLIER
     
-    # Apply time-of-day adjustments
-    if time_of_day and time_of_day in TIME_OF_DAY_ADJUSTMENTS:
-        time_adjustments = TIME_OF_DAY_ADJUSTMENTS[time_of_day]
-        for activity in activity_scores:
-            if activity in time_adjustments:
-                activity_scores[activity] *= time_adjustments[activity]
+    # Apply frequency-based multipliers
+    # Get counts for all activity types (default to 0 if not in dict)
+    counts = {activity: activity_counts.get(activity, 0) for activity in ACTIVITY_TYPES}
     
-    # Apply recent activity penalty (penalize recently used activities)
-    recent_activity_types = [log.get('intervention_type') for log in recent_activity_logs[-5:]]  # Last 5 activities
-    for activity_type in recent_activity_types:
-        if activity_type in activity_scores:
-            activity_scores[activity_type] *= 0.8  # Reduce by 20% if recently used
+    # Group activities by their frequency count
+    # Activities with the same count will get the same multiplier
+    frequency_groups = {}
+    for activity in ACTIVITY_TYPES:
+        count = counts[activity]
+        if count not in frequency_groups:
+            frequency_groups[count] = []
+        frequency_groups[count].append(activity)
+    
+    # Sort groups by count (descending) to determine group rank
+    sorted_group_counts = sorted(frequency_groups.keys(), reverse=True)
+    
+    # Assign multipliers to groups and apply to activities
+    # All activities in the same group get the same multiplier
+    for group_rank, group_count in enumerate(sorted_group_counts, start=1):
+        multiplier = FREQUENCY_MULTIPLIERS.get(group_rank, 1.0)
+        activities_in_group = frequency_groups[group_count]
+        
+        for activity_type in activities_in_group:
+            if activity_type in activity_scores:
+                activity_scores[activity_type] *= multiplier
+                logger.debug(f"Applied frequency multiplier {multiplier}x to {activity_type} (group rank {group_rank}, count {group_count})")
     
     # Normalize scores to 0.0-1.0 range
     max_score = max(activity_scores.values()) if activity_scores.values() else 1.0
@@ -145,7 +131,7 @@ def suggest_activities(
         reverse=True
     )
     
-    # Create ranked list (1-5, where 1 is best)
+    # Create ranked list (1-4, where 1 is best)
     ranked_activities = []
     for rank, (activity_type, score) in enumerate(sorted_activities, start=1):
         ranked_activities.append({
@@ -157,8 +143,6 @@ def suggest_activities(
     # Generate reasoning
     reasoning_parts = []
     reasoning_parts.append(f"Emotion: {emotion_label}")
-    if time_of_day:
-        reasoning_parts.append(f"Time of day: {time_of_day}")
     top_activity = ranked_activities[0] if ranked_activities else None
     if top_activity:
         reasoning_parts.append(f"Top suggestion: {top_activity['activity_type']} (score: {top_activity['score']:.3f})")
