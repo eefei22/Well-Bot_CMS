@@ -1,3 +1,5 @@
+
+# cd Well-Bot_cloud
 # py -3.12 -m venv venv
 # .\venv\Scripts\Activate.ps1
 # python -m pip install -r requirements.txt
@@ -31,3 +33,12 @@ sentence-transformers>=2.2.0
 torch>=2.0.0
 langdetect>=1.0.9
 
+
+# Terminal 1: Start mock services
+# python testing/mock_model_services.py
+
+# Terminal 2: Start fusion service (if not already running)
+# python main.py
+
+# Terminal 3: Run E2E test
+# python testing/test_fusion_e2e.py
