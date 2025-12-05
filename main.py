@@ -13,6 +13,7 @@ from datetime import datetime
 from utils import database, schemas
 from context_generator import context_extractor, facts_extractor, message_preprocessor, title_generator
 from intervention import intervention
+from fusion import api as fusion_api
 
 # Setup logging with timestamps
 logging.basicConfig(
@@ -356,6 +357,10 @@ async def generate_journal_title(request: schemas.GenerateTitleRequest):
         total_duration = (end_time - start_time).total_seconds()
         logger.error(f"POST /api/journal/generate-title - Exception at {end_time.strftime('%H:%M:%S')} after {total_duration:.2f}s: {e}")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+# Include fusion service routes
+app.include_router(fusion_api.router)
 
 
 if __name__ == "__main__":
