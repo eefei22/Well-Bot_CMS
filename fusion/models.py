@@ -61,4 +61,14 @@ class NoSignalsResponse(BaseModel):
     reason: str = "no valid modality outputs"
 
 
+class EmotionSnapshotDemoRequest(BaseModel):
+    """Request model for demo snapshot endpoint (testing only)."""
+    user_id: str = Field(..., description="UUID of the user")
+    timestamp: Optional[str] = Field(default=None, description="Snapshot timestamp (ISO format). If not provided, uses current time.")
+    signals: Dict[str, str] = Field(
+        ...,
+        description="Signals in simplified format: {'speech': 'Sad:0.82,Happy:0.6', 'face': 'Sad:0.75', 'vitals': 'Sad:0.88'}"
+    )
+
+
 

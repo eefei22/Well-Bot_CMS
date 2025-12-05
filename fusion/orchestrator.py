@@ -16,7 +16,7 @@ import asyncio
 from typing import Optional, Dict, List, Union
 from datetime import datetime
 
-from fusion.models import EmotionSnapshotRequest, FusedEmotionResponse, NoSignalsResponse, SignalUsed, ModelSignal
+from fusion.models import EmotionSnapshotRequest, FusedEmotionResponse, NoSignalsResponse, SignalUsed, ModelSignal, EmotionSnapshotDemoRequest
 from fusion.model_clients import SERClient, FERClient, VitalsClient
 from fusion.fusion_logic import fuse_signals
 from fusion.config_loader import load_config
@@ -210,5 +210,213 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
         raise
     except Exception as e:
         logger.error(f"Error processing emotion snapshot for user {request.user_id}: {e}", exc_info=True)
+        raise
+
+
+def parse_demo_signal_string(input_str: str, user_id: str, modality: str, snapshot_timestamp: datetime) -> List[ModelSignal]:
+    """
+    Parse simplified signal string format into ModelSignal objects.
+    
+    Format: "emotion:confidence" or "emotion1:conf1,emotion2:conf2"
+    Examples: "Sad:0.8" or "Sad:0.8,Happy:0.6"
+    
+    Args:
+        input_str: Input string (e.g., "Sad:0.82,Happy:0.60")
+        user_id: User ID
+        modality: Modality name ("speech", "face", "vitals")
+        snapshot_timestamp: Timestamp to use for signals
+    
+    Returns:
+        List of ModelSignal objects
+    """
+    signals = []
+    
+    if not input_str or input_str.strip() == "":
+        return signals
+    
+    # Split by comma for multiple signals
+    signal_strings = [s.strip() for s in input_str.split(",")]
+    
+    malaysia_tz = database.get_malaysia_timezone()
+    
+    # Emotion label mapping (case-insensitive)
+    emotion_mapping = {
+        "angry": "Angry",
+        "sad": "Sad",
+        "happy": "Happy",
+        "fear": "Fear"
+    }
+    
+    for signal_str in signal_strings:
+        parts = signal_str.split(":")
+        
+        if len(parts) < 2:
+            logger.warning(f"Invalid format: {signal_str} (expected emotion:confidence)")
+            continue
+        
+        emotion_label_raw = parts[0].strip()
+        try:
+            confidence = float(parts[1].strip())
+        except ValueError:
+            logger.warning(f"Invalid confidence: {parts[1]}")
+            continue
+        
+        # Normalize emotion label (case-insensitive)
+        emotion_label_lower = emotion_label_raw.lower()
+        emotion_label = emotion_mapping.get(emotion_label_lower)
+        
+        if emotion_label is None:
+            valid_emotions = ["Angry", "Sad", "Happy", "Fear"]
+            logger.warning(f"Invalid emotion: {emotion_label_raw} (must be one of {valid_emotions})")
+            continue
+        
+        # Parse timestamp if provided, otherwise use snapshot_timestamp
+        if len(parts) >= 3:
+            try:
+                timestamp_str = parts[2].strip()
+                signal_timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                if signal_timestamp.tzinfo is None:
+                    signal_timestamp = signal_timestamp.replace(tzinfo=malaysia_tz)
+                else:
+                    signal_timestamp = signal_timestamp.astimezone(malaysia_tz)
+            except Exception:
+                logger.warning(f"Invalid timestamp: {parts[2]}, using snapshot timestamp")
+                signal_timestamp = snapshot_timestamp
+        else:
+            signal_timestamp = snapshot_timestamp
+        
+        signal = ModelSignal(
+            user_id=user_id,
+            timestamp=signal_timestamp.isoformat(),
+            modality=modality,
+            emotion_label=emotion_label,
+            confidence=confidence
+        )
+        signals.append(signal)
+    
+    return signals
+
+
+def process_emotion_snapshot_demo(request: EmotionSnapshotDemoRequest) -> Union[FusedEmotionResponse, NoSignalsResponse]:
+    """
+    Process a demo emotion snapshot request with direct signal input.
+    
+    This bypasses model service calls and uses signals provided directly in the request.
+    Used for testing and demonstrations only.
+    
+    Args:
+        request: EmotionSnapshotDemoRequest with user_id and signals dict
+    
+    Returns:
+        FusedEmotionResponse with fused result, or NoSignalsResponse if no valid signals
+    """
+    logger.info(f"Processing demo emotion snapshot request for user {request.user_id}")
+    
+    try:
+        # Step 1: Validate request
+        import uuid
+        try:
+            uuid.UUID(request.user_id)
+        except (ValueError, TypeError):
+            raise ValueError(f"Invalid user_id format: '{request.user_id}'. Must be a valid UUID.")
+        
+        # Step 2: Determine snapshot timestamp
+        if request.timestamp:
+            snapshot_timestamp = datetime.fromisoformat(request.timestamp.replace('Z', '+00:00'))
+            malaysia_tz = database.get_malaysia_timezone()
+            if snapshot_timestamp.tzinfo is None:
+                snapshot_timestamp = snapshot_timestamp.replace(tzinfo=malaysia_tz)
+            else:
+                snapshot_timestamp = snapshot_timestamp.astimezone(malaysia_tz)
+        else:
+            snapshot_timestamp = database.get_current_time_utc8()
+        
+        logger.info(f"Demo snapshot timestamp: {snapshot_timestamp.isoformat()}")
+        
+        # Step 3: Parse signals from request
+        all_signals: List[ModelSignal] = []
+        
+        # Map modality names
+        modality_mapping = {
+            "speech": "speech",
+            "ser": "speech",  # Allow SER as alias
+            "face": "face",
+            "fer": "face",  # Allow FER as alias
+            "vitals": "vitals"
+        }
+        
+        for modality_key, signal_string in request.signals.items():
+            # Normalize modality key
+            modality_key_lower = modality_key.lower()
+            modality = modality_mapping.get(modality_key_lower)
+            
+            if not modality:
+                logger.warning(f"Unknown modality key: {modality_key}, skipping")
+                continue
+            
+            if not signal_string or signal_string.strip() == "":
+                continue
+            
+            # Parse signal string
+            parsed_signals = parse_demo_signal_string(
+                signal_string,
+                request.user_id,
+                modality,
+                snapshot_timestamp
+            )
+            all_signals.extend(parsed_signals)
+            logger.debug(f"Parsed {len(parsed_signals)} signals for {modality}")
+        
+        logger.info(f"Total signals parsed: {len(all_signals)}")
+        
+        # Step 4: Check minimum signals requirement
+        if not all_signals:
+            logger.warning("No valid signals found in demo request")
+            return NoSignalsResponse(reason="no valid signals provided")
+        
+        # Step 5: Run fusion logic
+        logger.debug("Running fusion logic on demo signals...")
+        try:
+            fused_result = fuse_signals(all_signals)
+        except ValueError as e:
+            logger.error(f"Fusion failed: {e}")
+            return NoSignalsResponse(reason=str(e))
+        
+        # Step 6: Write to database
+        logger.debug("Writing fused result to database...")
+        inserted_id = database.insert_emotional_log(
+            user_id=request.user_id,
+            timestamp=snapshot_timestamp,
+            emotion_label=fused_result["emotion_label"],
+            confidence_score=fused_result["confidence_score"],
+            emotional_score=fused_result["emotional_score"]
+        )
+        
+        if inserted_id is None:
+            logger.error("Failed to insert emotion log to database")
+            # Still return the fused result even if DB write fails
+        
+        # Step 7: Return response
+        response = FusedEmotionResponse(
+            user_id=request.user_id,
+            timestamp=snapshot_timestamp.isoformat(),
+            emotion_label=fused_result["emotion_label"],
+            confidence_score=fused_result["confidence_score"],
+            emotional_score=fused_result["emotional_score"],
+            signals_used=[
+                SignalUsed(**sig) for sig in fused_result["signals_used"]
+            ]
+        )
+        
+        logger.info(f"Successfully processed demo emotion snapshot for user {request.user_id}: "
+                   f"{response.emotion_label} (confidence: {response.confidence_score:.3f})")
+        
+        return response
+        
+    except ValueError as e:
+        logger.error(f"Validation error processing demo emotion snapshot: {e}")
+        raise
+    except Exception as e:
+        logger.error(f"Error processing demo emotion snapshot for user {request.user_id}: {e}", exc_info=True)
         raise
 
