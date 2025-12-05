@@ -4,6 +4,11 @@
 # .\venv\Scripts\Activate.ps1
 # python -m pip install -r requirements.txt
 
+# export FUSION_SERVICE_URL=https://user-context-well-bot-520080168829.asia-south1.run.app
+# export DEV_USER_ID=8517c97f-66ef-4955-86ed-531013d33d3e
+# Run demo script
+# python testing/demo_fusion_remote.py
+
 # FastAPI and server
 fastapi==0.109.0
 uvicorn[standard]==0.27.0
@@ -32,13 +37,3 @@ requests==2.31.0
 sentence-transformers>=2.2.0
 torch>=2.0.0
 langdetect>=1.0.9
-
-
-# Terminal 1: Start mock services
-# python testing/mock_model_services.py
-
-# Terminal 2: Start fusion service (if not already running)
-# python main.py
-
-# Terminal 3: Run E2E test
-# python testing/test_fusion_e2e.py
