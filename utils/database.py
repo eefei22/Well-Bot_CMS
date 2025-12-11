@@ -312,6 +312,68 @@ def get_latest_emotion_log(user_id: str) -> Optional[Dict]:
         return None
 
 
+def insert_emotional_log(
+    user_id: str,
+    timestamp: datetime,
+    emotion_label: str,
+    confidence_score: float,
+    emotional_score: Optional[int] = None
+) -> Optional[int]:
+    """
+    Insert a fused emotion result into the emotional_log table.
+    
+    Args:
+        user_id: UUID of the user
+        timestamp: Timestamp for the emotion log (should be UTC+8 timezone-aware)
+        emotion_label: Emotion label ('Angry', 'Sad', 'Happy', 'Fear')
+        confidence_score: Confidence score (0.0 to 1.0)
+        emotional_score: Emotional score (0 to 100), optional
+    
+    Returns:
+        ID of the inserted record if successful, None if failed.
+    """
+    try:
+        client = get_supabase_client()
+        
+        # Ensure timestamp is timezone-aware (UTC+8)
+        if timestamp.tzinfo is None:
+            malaysia_tz = get_malaysia_timezone()
+            timestamp = timestamp.replace(tzinfo=malaysia_tz)
+        
+        # Convert timestamp to ISO format string (timezone-naive for database)
+        # Database stores timestamps as timezone-naive in UTC+8
+        timestamp_str = timestamp.isoformat()
+        
+        # Prepare data for insertion
+        data = {
+            "user_id": user_id,
+            "timestamp": timestamp_str,
+            "emotion_label": emotion_label,
+            "confidence_score": confidence_score
+        }
+        
+        # Add emotional_score if provided
+        if emotional_score is not None:
+            data["emotional_score"] = emotional_score
+        
+        # Insert into database
+        response = client.table("emotional_log")\
+            .insert(data)\
+            .execute()
+        
+        if response.data and len(response.data) > 0:
+            inserted_id = response.data[0].get("id")
+            logger.info(f"Inserted emotion log for user {user_id}: {emotion_label} "
+                       f"(confidence: {confidence_score:.2f}, emotional_score: {emotional_score})")
+            return inserted_id
+        else:
+            logger.warning(f"Insert returned no data for user {user_id}")
+            return None
+    except Exception as e:
+        logger.error(f"Failed to insert emotion log for user {user_id}: {e}")
+        return None
+
+
 def fetch_recent_activity_logs(user_id: str, hours: int = 24) -> List[Dict]:
     """
     Fetch recent activity logs for a user from the intervention_log table.

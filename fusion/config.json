@@ -1,0 +1,15 @@
+{
+  "fusion_weights": {
+    "speech": 0.4,
+    "face": 0.3,
+    "vitals": 0.3
+  },
+  "time_window_seconds": 60,
+  "model_timeout_seconds": 1.5,
+  "model_service_urls": {
+    "ser": "http://localhost:8005",
+    "fer": "http://localhost:8006",
+    "vitals": "http://localhost:8007"
+  }
+}
+
