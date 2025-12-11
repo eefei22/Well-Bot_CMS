@@ -7,7 +7,7 @@
   "time_window_seconds": 60,
   "model_timeout_seconds": 1.5,
   "model_service_urls": {
-    "ser": "https://well-bot-emotionrecognition-520080168829.asia-south1.run.app",
+    "ser": "http://localhost:8005",
     "fer": "http://localhost:8006",
     "vitals": "http://localhost:8007"
   }
