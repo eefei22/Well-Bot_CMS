@@ -8,6 +8,7 @@ import os
 import logging
 from typing import Optional
 from dotenv import load_dotenv
+from langdetect import detect, LangDetectException
 
 from utils.llm import DeepSeekClient
 
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 def detect_language(text: str) -> str:
     """
-    Detect the primary language of the text.
+    Detect the primary language of the text using langdetect library.
     
     Args:
         text: Text to analyze
@@ -30,18 +31,47 @@ def detect_language(text: str) -> str:
     Returns:
         Language name (e.g., "English", "Chinese", "Malay")
     """
-    # Simple heuristic: check for Chinese characters
-    has_chinese = any('\u4e00' <= char <= '\u9fff' for char in text)
-    if has_chinese:
-        return "Chinese"
+    if not text or not text.strip():
+        return "English"  # Default fallback
     
-    # Check for common Chinese punctuation
-    chinese_punct = ['，', '。', '？', '！', '；', '：']
-    if any(punct in text for punct in chinese_punct):
-        return "Chinese"
-    
-    # Default to English (can be enhanced with langdetect library if needed)
-    return "English"
+    try:
+        # Use langdetect to detect language code
+        lang_code = detect(text)
+        logger.debug(f"langdetect detected language code: {lang_code}")
+        
+        # Map language codes to language names
+        language_map = {
+            'en': 'English',
+            'zh-cn': 'Chinese',
+            'zh-tw': 'Chinese',
+            'ms': 'Malay',  # Bahasa Malaysia
+            'id': 'Malay',  # Indonesian (close enough, can generate Malay titles)
+            'zh': 'Chinese',  # Generic Chinese
+        }
+        
+        # Get language name from map, or use the code itself
+        language_name = language_map.get(lang_code, lang_code)
+        
+        # If not in map, try to infer from code prefix
+        if language_name == lang_code:
+            if lang_code.startswith('zh'):
+                language_name = 'Chinese'
+            elif lang_code.startswith('ms') or lang_code.startswith('id'):
+                language_name = 'Malay'
+            else:
+                # Default to English for unknown languages
+                language_name = 'English'
+                logger.warning(f"Unknown language code '{lang_code}', defaulting to English")
+        
+        logger.info(f"Detected language: {language_name} (code: {lang_code})")
+        return language_name
+        
+    except LangDetectException as e:
+        logger.warning(f"Language detection failed: {e}, defaulting to English")
+        return "English"
+    except Exception as e:
+        logger.warning(f"Unexpected error in language detection: {e}, defaulting to English")
+        return "English"
 
 
 def generate_journal_title(body: str) -> str:
@@ -85,6 +115,8 @@ def generate_journal_title(body: str) -> str:
     language_instruction = ""
     if detected_language == "Chinese":
         language_instruction = "请用中文生成标题。"
+    elif detected_language == "Malay":
+        language_instruction = "Jana tajuk dalam Bahasa Malaysia."
     elif detected_language == "English":
         language_instruction = "Generate the title in English."
     else:
@@ -99,7 +131,7 @@ Task: Generate a single, concise title that meaningfully describes the main them
 
 Requirements:
 - {language_instruction}
-- The title should be concise (preferably under 10 words or 20 characters for Chinese)
+- The title should be concise (preferably under 10 words or 20 characters for Chinese/Malay)
 - The title should capture the main theme, emotion, or topic discussed
 - Do not include quotation marks, dates, or timestamps
 - Do not include phrases like "Journal entry about" or "My thoughts on"
