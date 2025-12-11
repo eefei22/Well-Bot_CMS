@@ -1,8 +1,8 @@
 
 # cd Well-Bot_cloud
-# py -3.12 -m venv venv
 # .\venv\Scripts\Activate.ps1
 # python -m pip install -r requirements.txt
+# py -3.12 -m venv venv
 
 # export FUSION_SERVICE_URL=https://user-context-well-bot-520080168829.asia-south1.run.app
 # export DEV_USER_ID=8517c97f-66ef-4955-86ed-531013d33d3e
