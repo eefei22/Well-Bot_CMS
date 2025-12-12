@@ -21,6 +21,7 @@ from fusion.model_clients import SERClient, FERClient, VitalsClient
 from fusion.fusion_logic import fuse_signals
 from fusion.config_loader import load_config
 from utils import database
+from utils import activity_logger
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +97,9 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
         
         logger.info(f"Snapshot timestamp: {snapshot_timestamp.isoformat()}, window: {window_seconds}s")
         
+        # Track start time for duration
+        fusion_start_time = datetime.now()
+        
         # Step 2: Call model services in parallel
         logger.debug("Calling model services in parallel...")
         
@@ -164,6 +168,16 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
         # Step 4: Check minimum signals requirement
         if not filtered_signals:
             logger.warning("No valid signals found within time window")
+            fusion_duration = (datetime.now() - fusion_start_time).total_seconds()
+            activity_logger.log_fusion_activity(
+                user_id=request.user_id,
+                timestamp=snapshot_timestamp,
+                status="no_signals",
+                ser_signals_count=len(ser_signals),
+                fer_signals_count=len(fer_signals),
+                vitals_signals_count=len(vitals_signals),
+                duration_seconds=fusion_duration
+            )
             return NoSignalsResponse(reason="no valid modality outputs")
         
         # Step 5: Run fusion logic
@@ -172,6 +186,17 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
             fused_result = fuse_signals(filtered_signals)
         except ValueError as e:
             logger.error(f"Fusion failed: {e}")
+            fusion_duration = (datetime.now() - fusion_start_time).total_seconds()
+            activity_logger.log_fusion_activity(
+                user_id=request.user_id,
+                timestamp=snapshot_timestamp,
+                status="error",
+                ser_signals_count=len(ser_signals),
+                fer_signals_count=len(fer_signals),
+                vitals_signals_count=len(vitals_signals),
+                error=str(e),
+                duration_seconds=fusion_duration
+            )
             return NoSignalsResponse(reason=str(e))
         
         # Step 6: Write to database
@@ -188,7 +213,23 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
             logger.error("Failed to insert emotion log to database")
             # Still return the fused result even if DB write fails
         
-        # Step 7: Return response
+        # Step 7: Log activity
+        fusion_duration = (datetime.now() - fusion_start_time).total_seconds()
+        activity_logger.log_fusion_activity(
+            user_id=request.user_id,
+            timestamp=snapshot_timestamp,
+            status="success",
+            emotion_label=fused_result["emotion_label"],
+            confidence_score=fused_result["confidence_score"],
+            signals_used=[{"modality": sig["modality"], "emotion_label": sig["emotion_label"], "confidence": sig["confidence"]} 
+                         for sig in fused_result["signals_used"]],
+            ser_signals_count=len(ser_signals),
+            fer_signals_count=len(fer_signals),
+            vitals_signals_count=len(vitals_signals),
+            duration_seconds=fusion_duration
+        )
+        
+        # Step 8: Return response
         response = FusedEmotionResponse(
             user_id=request.user_id,
             timestamp=snapshot_timestamp.isoformat(),
@@ -207,9 +248,31 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
         
     except ValueError as e:
         logger.error(f"Validation error processing emotion snapshot: {e}")
+        # Log error activity
+        try:
+            snapshot_timestamp = database.get_current_time_utc8()
+            activity_logger.log_fusion_activity(
+                user_id=request.user_id,
+                timestamp=snapshot_timestamp,
+                status="error",
+                error=f"Validation error: {str(e)}"
+            )
+        except Exception:
+            pass
         raise
     except Exception as e:
         logger.error(f"Error processing emotion snapshot for user {request.user_id}: {e}", exc_info=True)
+        # Log error activity
+        try:
+            snapshot_timestamp = database.get_current_time_utc8()
+            activity_logger.log_fusion_activity(
+                user_id=request.user_id,
+                timestamp=snapshot_timestamp,
+                status="error",
+                error=f"Exception: {str(e)}"
+            )
+        except Exception:
+            pass
         raise
 
 

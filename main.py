@@ -10,7 +10,8 @@ import logging
 from datetime import datetime
 
 # Import modules
-from utils import database, schemas
+from utils import database, schemas, activity_logger
+from utils import dashboard as dashboard_module
 from context_generator import context_extractor, facts_extractor, message_preprocessor, title_generator
 from intervention import intervention
 from fusion import api as fusion_api
@@ -183,16 +184,34 @@ async def process_user_context(request: schemas.ProcessContextRequest):
         context_success = persona_summary is not None
         
         if facts_success and context_success:
-            overall_status = "Success"
+            overall_status = "success"
         elif facts_success or context_success:
-            overall_status = "Partial Success"
+            overall_status = "partial_success"
         else:
-            overall_status = "Failure"
+            overall_status = "error"
+        
+        # Log context activity
+        activity_logger.log_context_activity(
+            user_id=actual_user_id,
+            timestamp=start_time,
+            status=overall_status,
+            conversation_id=request.conversation_id,
+            facts_extracted=facts_success,
+            context_extracted=context_success,
+            facts_length=len(facts) if facts else None,
+            context_length=len(persona_summary) if persona_summary else None,
+            messages_processed=embed_result.get('messages_processed') if embed_result else None,
+            chunks_created=embed_result.get('chunks_created') if embed_result else None,
+            duration_seconds=total_duration,
+            embed_duration=embed_duration if embed_duration > 0 else None,
+            facts_duration=facts_duration,
+            context_duration=context_duration
+        )
         
         logger.info("")
         logger.info("=" * 60)
         logger.info("=== PROCESSING COMPLETE ===")
-        logger.info(f"Status: {overall_status}")
+        logger.info(f"Status: {overall_status.title()}")
         logger.info(f"Extracted: Facts {'✓' if facts_success else '✗'} | Context {'✓' if context_success else '✗'}")
         logger.info(f"Total duration: {total_duration:.2f}s")
         if embed_duration > 0:
@@ -217,6 +236,20 @@ async def process_user_context(request: schemas.ProcessContextRequest):
         logger.error(f"Error: {e}")
         logger.error(f"Total duration: {total_duration:.2f}s")
         logger.error("=" * 60)
+        
+        # Log error activity
+        try:
+            activity_logger.log_context_activity(
+                user_id=request.user_id,
+                timestamp=start_time,
+                status="error",
+                conversation_id=request.conversation_id,
+                error=f"ValueError: {str(e)}",
+                duration_seconds=total_duration
+            )
+        except Exception:
+            pass
+        
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         end_time = datetime.now()
@@ -231,6 +264,24 @@ async def process_user_context(request: schemas.ProcessContextRequest):
         if facts_duration > 0 or context_duration > 0:
             logger.error(f"Partial results: Facts {'✓' if facts is not None else '✗'} | Context {'✓' if persona_summary is not None else '✗'}")
         logger.error("=" * 60)
+        
+        # Log error activity
+        try:
+            activity_logger.log_context_activity(
+                user_id=request.user_id,
+                timestamp=start_time,
+                status="error",
+                conversation_id=request.conversation_id,
+                facts_extracted=facts is not None,
+                context_extracted=persona_summary is not None,
+                facts_length=len(facts) if facts else None,
+                context_length=len(persona_summary) if persona_summary else None,
+                error=f"{type(e).__name__}: {str(e)}",
+                duration_seconds=total_duration
+            )
+        except Exception:
+            pass
+        
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
@@ -259,7 +310,7 @@ async def suggest_intervention(request: schemas.SuggestionRequest):
     logger.info(f"  User ID: {request.user_id}")
     
     try:
-        response = intervention.process_suggestion_request(request)
+        response = await intervention.process_suggestion_request(request)
         
         end_time = datetime.now()
         total_duration = (end_time - start_time).total_seconds()
@@ -361,6 +412,9 @@ async def generate_journal_title(request: schemas.GenerateTitleRequest):
 
 # Include fusion service routes
 app.include_router(fusion_api.router)
+
+# Include dashboard routes
+app.include_router(dashboard_module.router)
 
 
 if __name__ == "__main__":
