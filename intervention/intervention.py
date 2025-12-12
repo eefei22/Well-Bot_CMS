@@ -41,12 +41,57 @@ async def call_fusion_service(user_id: str) -> Optional[dict]:
     This triggers fusion to query SER, FER, and Vitals services and write
     the fused result to the emotional_log table.
     
+    Uses internal function call if available (same process), otherwise falls back to HTTP.
+    
     Args:
         user_id: User UUID
         
     Returns:
         Dictionary with fusion result, or None if fusion call failed
     """
+    # Try internal call first (same process, no HTTP overhead)
+    try:
+        from fusion.orchestrator import process_emotion_snapshot
+        from fusion.models import EmotionSnapshotRequest
+        
+        logger.info(f"Calling fusion service internally for user {user_id}")
+        
+        request = EmotionSnapshotRequest(user_id=user_id)
+        result = await process_emotion_snapshot(request)
+        
+        # Handle NoSignalsResponse
+        if hasattr(result, 'status') and result.status == "no_signals":
+            logger.warning(f"Fusion service returned no signals: {result.reason}")
+            return None
+        
+        # Convert FusedEmotionResponse to dict
+        if hasattr(result, 'dict'):
+            result_dict = result.dict()
+        else:
+            result_dict = {
+                "user_id": result.user_id,
+                "timestamp": result.timestamp,
+                "emotion_label": result.emotion_label,
+                "confidence_score": result.confidence_score,
+                "emotional_score": result.emotional_score,
+                "signals_used": [sig.dict() if hasattr(sig, 'dict') else sig for sig in result.signals_used]
+            }
+        
+        logger.info(
+            f"Fusion completed: {result_dict.get('emotion_label', 'unknown')} "
+            f"(confidence: {result_dict.get('confidence_score', 0.0):.2f})"
+        )
+        return result_dict
+        
+    except ImportError:
+        # Fallback to HTTP if internal import fails
+        logger.debug("Internal fusion call not available, using HTTP")
+        pass
+    except Exception as e:
+        logger.warning(f"Internal fusion call failed, falling back to HTTP: {e}")
+        pass
+    
+    # Fallback to HTTP call
     fusion_url = os.getenv("FUSION_SERVICE_URL", "http://localhost:8000")
     fusion_endpoint = f"{fusion_url}/emotion/snapshot"
     
@@ -55,7 +100,7 @@ async def call_fusion_service(user_id: str) -> Optional[dict]:
     }
     
     try:
-        logger.info(f"Calling fusion service at {fusion_endpoint} for user {user_id}")
+        logger.info(f"Calling fusion service via HTTP at {fusion_endpoint} for user {user_id}")
         
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
