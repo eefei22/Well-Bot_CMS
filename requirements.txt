@@ -32,8 +32,16 @@ tzdata>=2024.1
 
 # Testing
 requests==2.31.0
+pyaudio>=0.2.14
 
 # Embeddings
 sentence-transformers>=2.2.0
 torch>=2.0.0
 langdetect>=1.0.9
+
+# ML Processing
+transformers>=4.30.0
+numpy>=1.24.0
+
+
+python-multipart
