@@ -1,0 +1,19 @@
+{
+  "signals": [
+    {
+      "user_id": "8517c97f-66ef-4955-86ed-531013d33d3e",
+      "timestamp": "2024-01-15T10:30:00+08:00",
+      "modality": "speech",
+      "emotion_label": "Sad",
+      "confidence": 0.82
+    },
+    {
+      "user_id": "8517c97f-66ef-4955-86ed-531013d33d3e",
+      "timestamp": "2024-01-15T10:30:15+08:00",
+      "modality": "speech",
+      "emotion_label": "Happy",
+      "confidence": 0.60
+    }
+  ]
+}
+
