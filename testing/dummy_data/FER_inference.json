@@ -2,17 +2,24 @@
   "signals": [
     {
       "user_id": "8517c97f-66ef-4955-86ed-531013d33d3e",
-      "timestamp": "2025-12-12T18:36:08.031959+08:00",
+      "timestamp": "2025-12-12T22:28:22.545193+08:00",
       "modality": "face",
-      "emotion_label": "Happy",
-      "confidence": 0.85
+      "emotion_label": "Sad",
+      "confidence": 0.87
     },
     {
       "user_id": "8517c97f-66ef-4955-86ed-531013d33d3e",
-      "timestamp": "2025-12-12T18:36:03.031959+08:00",
+      "timestamp": "2025-12-12T22:28:23.545193+08:00",
       "modality": "face",
-      "emotion_label": "Happy",
-      "confidence": 0.61
+      "emotion_label": "Angry",
+      "confidence": 0.81
+    },
+    {
+      "user_id": "8517c97f-66ef-4955-86ed-531013d33d3e",
+      "timestamp": "2025-12-12T22:28:45.545193+08:00",
+      "modality": "face",
+      "emotion_label": "Sad",
+      "confidence": 0.68
     }
   ]
 }

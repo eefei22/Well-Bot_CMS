@@ -24,7 +24,8 @@ DEFAULT_CONFIG = {
         "ser": "http://localhost:8001",
         "fer": "http://localhost:8002",
         "vitals": "http://localhost:8003"
-    }
+    },
+    "simulation_service_url": None
 }
 
 # Cache for loaded config
