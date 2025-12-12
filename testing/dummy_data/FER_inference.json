@@ -1,0 +1,18 @@
+{
+  "signals": [
+    {
+      "user_id": "8517c97f-66ef-4955-86ed-531013d33d3e",
+      "timestamp": "2025-12-12T18:35:49.030657+08:00",
+      "modality": "face",
+      "emotion_label": "Angry",
+      "confidence": 0.89
+    },
+    {
+      "user_id": "8517c97f-66ef-4955-86ed-531013d33d3e",
+      "timestamp": "2025-12-12T18:35:28.030657+08:00",
+      "modality": "face",
+      "emotion_label": "Fear",
+      "confidence": 0.81
+    }
+  ]
+}

@@ -379,11 +379,34 @@ async def dashboard():
                         ${activity.model_signals ? `
                             <div class="item-detail-row">
                                 <div class="item-detail" style="font-size: 0.85em;">
-                                    Signals: SER(${activity.model_signals.ser || 0}) FER(${activity.model_signals.fer || 0}) Vitals(${activity.model_signals.vitals || 0})
+                                    Signals Received: SER(${activity.model_signals.ser || 0}) FER(${activity.model_signals.fer || 0}) Vitals(${activity.model_signals.vitals || 0})
                                 </div>
                                 <div class="item-detail" style="font-size: 0.85em;">
                                     Duration: ${formatDuration(activity.duration_seconds)}
                                 </div>
+                            </div>
+                        ` : ''}
+                        ${activity.model_signals_detail ? `
+                            <div class="item-detail" style="font-size: 0.8em; margin-top: 5px; color: #888;">
+                                ${activity.model_signals_detail.ser && activity.model_signals_detail.ser.length > 0 ? `
+                                    SER: ${activity.model_signals_detail.ser.map(s => `${s.emotion_label}(${(s.confidence * 100).toFixed(0)}%)`).join(', ')}
+                                ` : ''}
+                                ${activity.model_signals_detail.fer && activity.model_signals_detail.fer.length > 0 ? `
+                                    FER: ${activity.model_signals_detail.fer.map(s => `${s.emotion_label}(${(s.confidence * 100).toFixed(0)}%)`).join(', ')}
+                                ` : ''}
+                                ${activity.model_signals_detail.vitals && activity.model_signals_detail.vitals.length > 0 ? `
+                                    Vitals: ${activity.model_signals_detail.vitals.map(s => `${s.emotion_label}(${(s.confidence * 100).toFixed(0)}%)`).join(', ')}
+                                ` : ''}
+                            </div>
+                        ` : ''}
+                        ${activity.fusion_calculation_log ? `
+                            <div class="item-detail" style="font-size: 0.8em; margin-top: 5px; color: #aaa; font-style: italic;">
+                                Calculation: ${activity.fusion_calculation_log}
+                            </div>
+                        ` : ''}
+                        ${activity.db_write_success !== undefined ? `
+                            <div class="item-detail" style="font-size: 0.8em; margin-top: 3px;">
+                                Database: <span style="color: ${activity.db_write_success ? '#4ecdc4' : '#ff6b6b'}">${activity.db_write_success ? '✓ Written' : '✗ Failed'}</span>
                             </div>
                         ` : ''}
                         ${activity.error ? `

@@ -61,7 +61,12 @@ def log_fusion_activity(
     fer_signals_count: int = 0,
     vitals_signals_count: int = 0,
     error: Optional[str] = None,
-    duration_seconds: Optional[float] = None
+    duration_seconds: Optional[float] = None,
+    ser_signals: Optional[list] = None,
+    fer_signals: Optional[list] = None,
+    vitals_signals: Optional[list] = None,
+    db_write_success: Optional[bool] = None,
+    fusion_calculation_log: Optional[str] = None
 ):
     """
     Log fusion service activity.
@@ -94,6 +99,16 @@ def log_fusion_activity(
             "fer": fer_signals_count,
             "vitals": vitals_signals_count
         },
+        "model_signals_detail": {
+            "ser": [{"emotion_label": s.get("emotion_label"), "confidence": s.get("confidence"), "timestamp": s.get("timestamp")} 
+                   for s in (ser_signals or [])] if ser_signals else [],
+            "fer": [{"emotion_label": s.get("emotion_label"), "confidence": s.get("confidence"), "timestamp": s.get("timestamp")} 
+                   for s in (fer_signals or [])] if fer_signals else [],
+            "vitals": [{"emotion_label": s.get("emotion_label"), "confidence": s.get("confidence"), "timestamp": s.get("timestamp")} 
+                      for s in (vitals_signals or [])] if vitals_signals else []
+        },
+        "db_write_success": db_write_success,
+        "fusion_calculation_log": fusion_calculation_log,
         "error": error,
         "duration_seconds": duration_seconds
     }

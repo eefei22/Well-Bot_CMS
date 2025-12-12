@@ -101,12 +101,15 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
         fusion_start_time = datetime.now()
         
         # Step 2: Call model services in parallel
-        logger.debug("Calling model services in parallel...")
-        
         # Initialize clients with optional timeout override
         ser_client = SERClient(timeout=timeout_override)
         fer_client = FERClient(timeout=timeout_override)
         vitals_client = VitalsClient(timeout=timeout_override)
+        
+        logger.info(f"Calling model services in parallel for user {request.user_id}...")
+        logger.info(f"  SER endpoint: {ser_client.service_url}/predict")
+        logger.info(f"  FER endpoint: {fer_client.service_url}/predict")
+        logger.info(f"  Vitals endpoint: {vitals_client.service_url}/predict")
         
         # Call all clients concurrently
         ser_task = ser_client.predict(request.user_id, snapshot_timestamp, window_seconds)
@@ -120,16 +123,31 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
             return_exceptions=True
         )
         
-        # Handle exceptions from any client
+        # Handle exceptions from any client and log results
+        ser_signals_list = []
+        fer_signals_list = []
+        vitals_signals_list = []
+        
         if isinstance(ser_signals, Exception):
             logger.warning(f"SER client raised exception: {ser_signals}")
             ser_signals = []
+        else:
+            ser_signals_list = [{"emotion_label": s.emotion_label, "confidence": s.confidence, "timestamp": s.timestamp} for s in ser_signals]
+            logger.info(f"SER returned {len(ser_signals)} signals: {ser_signals_list}")
+        
         if isinstance(fer_signals, Exception):
             logger.warning(f"FER client raised exception: {fer_signals}")
             fer_signals = []
+        else:
+            fer_signals_list = [{"emotion_label": s.emotion_label, "confidence": s.confidence, "timestamp": s.timestamp} for s in fer_signals]
+            logger.info(f"FER returned {len(fer_signals)} signals: {fer_signals_list}")
+        
         if isinstance(vitals_signals, Exception):
             logger.warning(f"Vitals client raised exception: {vitals_signals}")
             vitals_signals = []
+        else:
+            vitals_signals_list = [{"emotion_label": s.emotion_label, "confidence": s.confidence, "timestamp": s.timestamp} for s in vitals_signals]
+            logger.info(f"Vitals returned {len(vitals_signals)} signals: {vitals_signals_list}")
         
         # Combine all signals
         all_signals: List[ModelSignal] = []
@@ -176,16 +194,25 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
                 ser_signals_count=len(ser_signals),
                 fer_signals_count=len(fer_signals),
                 vitals_signals_count=len(vitals_signals),
+                ser_signals=ser_signals_list,
+                fer_signals=fer_signals_list,
+                vitals_signals=vitals_signals_list,
+                fusion_calculation_log="No signals after filtering",
                 duration_seconds=fusion_duration
             )
             return NoSignalsResponse(reason="no valid modality outputs")
         
         # Step 5: Run fusion logic
-        logger.debug("Running fusion logic...")
+        logger.info(f"Running fusion logic on {len(filtered_signals)} filtered signals...")
+        fusion_calculation_log = f"Input signals: {len(filtered_signals)} total"
         try:
             fused_result = fuse_signals(filtered_signals)
+            fusion_calculation_log += f" | Result: {fused_result['emotion_label']} (confidence: {fused_result['confidence_score']:.3f}, emotional_score: {fused_result['emotional_score']})"
+            fusion_calculation_log += f" | Signals used: {len(fused_result.get('signals_used', []))}"
+            logger.info(f"Fusion calculation complete: {fused_result['emotion_label']} (confidence: {fused_result['confidence_score']:.3f})")
         except ValueError as e:
-            logger.error(f"Fusion failed: {e}")
+            logger.error(f"Fusion calculation failed: {e}")
+            fusion_calculation_log += f" | Error: {str(e)}"
             fusion_duration = (datetime.now() - fusion_start_time).total_seconds()
             activity_logger.log_fusion_activity(
                 user_id=request.user_id,
@@ -194,13 +221,18 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
                 ser_signals_count=len(ser_signals),
                 fer_signals_count=len(fer_signals),
                 vitals_signals_count=len(vitals_signals),
+                ser_signals=ser_signals_list,
+                fer_signals=fer_signals_list,
+                vitals_signals=vitals_signals_list,
+                fusion_calculation_log=fusion_calculation_log,
                 error=str(e),
                 duration_seconds=fusion_duration
             )
             return NoSignalsResponse(reason=str(e))
         
         # Step 6: Write to database
-        logger.debug("Writing fused result to database...")
+        logger.info("Writing fused result to database...")
+        db_write_success = False
         inserted_id = database.insert_emotional_log(
             user_id=request.user_id,
             timestamp=snapshot_timestamp,
@@ -211,7 +243,10 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
         
         if inserted_id is None:
             logger.error("Failed to insert emotion log to database")
-            # Still return the fused result even if DB write fails
+            db_write_success = False
+        else:
+            logger.info(f"Successfully wrote to database (ID: {inserted_id})")
+            db_write_success = True
         
         # Step 7: Log activity
         fusion_duration = (datetime.now() - fusion_start_time).total_seconds()
@@ -226,6 +261,11 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
             ser_signals_count=len(ser_signals),
             fer_signals_count=len(fer_signals),
             vitals_signals_count=len(vitals_signals),
+            ser_signals=ser_signals_list,
+            fer_signals=fer_signals_list,
+            vitals_signals=vitals_signals_list,
+            db_write_success=db_write_success,
+            fusion_calculation_log=fusion_calculation_log,
             duration_seconds=fusion_duration
         )
         
