@@ -19,13 +19,8 @@ DEFAULT_CONFIG = {
         "vitals": 0.3
     },
     "time_window_seconds": 60,
-    "model_timeout_seconds": 1.5,
-    "model_service_urls": {
-        "ser": "http://localhost:8001",
-        "fer": "http://localhost:8002",
-        "vitals": "http://localhost:8003"
-    },
-    "simulation_service_url": None
+    "intervention_window_minutes": 15,
+    "model_timeout_seconds": 1.5
 }
 
 # Cache for loaded config

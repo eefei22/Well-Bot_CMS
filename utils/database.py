@@ -312,6 +312,51 @@ def get_latest_emotion_log(user_id: str) -> Optional[Dict]:
         return None
 
 
+def get_last_emotion_log_timestamp(user_id: str) -> Optional[datetime]:
+    """
+    Get the timestamp of the last emotion log entry for a user.
+    
+    This is used by Fusion to determine which signals have already been processed.
+    
+    Args:
+        user_id: UUID of the user
+    
+    Returns:
+        Timezone-aware datetime (UTC+8) of the last emotion log, or None if no records exist
+    """
+    try:
+        client = get_supabase_client()
+        malaysia_tz = get_malaysia_timezone()
+        
+        response = client.table("emotional_log")\
+            .select("timestamp")\
+            .eq("user_id", user_id)\
+            .order("timestamp", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if response.data and len(response.data) > 0:
+            timestamp_str = response.data[0].get("timestamp")
+            if timestamp_str:
+                # Parse timestamp string to datetime
+                timestamp = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+                # Ensure timezone-aware (UTC+8)
+                if timestamp.tzinfo is None:
+                    timestamp = timestamp.replace(tzinfo=malaysia_tz)
+                else:
+                    timestamp = timestamp.astimezone(malaysia_tz)
+                logger.debug(f"Last emotion log timestamp for user {user_id}: {timestamp.isoformat()}")
+                return timestamp
+        
+        # No emotion logs found
+        logger.debug(f"No emotion logs found for user {user_id}")
+        return None
+        
+    except Exception as e:
+        logger.warning(f"Failed to query last emotion log timestamp for user {user_id}: {e}", exc_info=True)
+        return None
+
+
 def insert_emotional_log(
     user_id: str,
     timestamp: datetime,
@@ -709,6 +754,277 @@ def get_activity_counts(user_id: str, days: int = 30) -> Dict[str, int]:
         logger.error(f"Failed to get activity counts for user {user_id}: {e}")
         # Return zeros on error
         return {'journal': 0, 'gratitude': 0, 'meditation': 0, 'quote': 0}
+
+
+def query_voice_emotion_signals(
+    user_id: str,
+    start_time: datetime,
+    end_time: datetime,
+    include_synthetic: bool = True
+) -> List[Dict]:
+    """
+    Query voice_emotion table and return ModelSignal-like dictionaries.
+    
+    Args:
+        user_id: UUID of the user
+        start_time: Start of time window (inclusive, UTC+8 timezone-aware)
+        end_time: End of time window (inclusive, UTC+8 timezone-aware)
+        include_synthetic: Whether to include synthetic data (default: True)
+        Note: Currently synthetic flag is not stored, so this parameter is ignored
+    
+    Returns:
+        List of dictionaries with ModelSignal-like structure
+    """
+    try:
+        client = get_supabase_client()
+        malaysia_tz = get_malaysia_timezone()
+        
+        # Ensure timestamps are timezone-aware (UTC+8)
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=malaysia_tz)
+        else:
+            start_time = start_time.astimezone(malaysia_tz)
+        
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=malaysia_tz)
+        else:
+            end_time = end_time.astimezone(malaysia_tz)
+        
+        # Convert to ISO format strings for database query
+        start_time_str = start_time.isoformat()
+        end_time_str = end_time.isoformat()
+        
+        # Mapping from SER emotion labels to fusion emotion labels
+        SER_TO_FUSION_EMOTION_MAP = {
+            "ang": "Angry",
+            "sad": "Sad",
+            "hap": "Happy",
+            "fea": "Fear",
+            "angry": "Angry",
+            "happy": "Happy",
+            "fearful": "Fear",
+            "fear": "Fear",
+        }
+        
+        def map_ser_emotion(ser_emotion: str) -> Optional[str]:
+            """Map SER emotion to fusion emotion."""
+            return SER_TO_FUSION_EMOTION_MAP.get(ser_emotion.lower())
+        
+        # Query database
+        query = client.table("voice_emotion")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .gte("timestamp", start_time_str)\
+            .lte("timestamp", end_time_str)\
+            .order("timestamp", desc=False)
+        
+        response = query.execute()
+        
+        signals = []
+        for record in response.data:
+            # Map SER emotion to fusion emotion
+            ser_emotion = record.get("predicted_emotion", "")
+            fusion_emotion = map_ser_emotion(ser_emotion)
+            
+            # Skip if emotion is not mappable
+            if fusion_emotion is None:
+                logger.debug(f"Skipping unmappable emotion: {ser_emotion}")
+                continue
+            
+            # Create ModelSignal-like dict
+            signal = {
+                "user_id": user_id,
+                "timestamp": record.get("timestamp", ""),
+                "modality": "speech",
+                "emotion_label": fusion_emotion,
+                "confidence": float(record.get("emotion_confidence", 0.0))
+            }
+            signals.append(signal)
+        
+        logger.info(
+            f"Queried {len(signals)} voice emotion signals for user {user_id} "
+            f"in window [{start_time_str}, {end_time_str}]"
+        )
+        return signals
+        
+    except Exception as e:
+        logger.error(f"Failed to query voice emotion signals: {e}", exc_info=True)
+        return []
+
+
+def query_face_emotion_signals(
+    user_id: str,
+    start_time: datetime,
+    end_time: datetime,
+    include_synthetic: bool = True
+) -> List[Dict]:
+    """
+    Query face_emotion table and return ModelSignal-like dictionaries.
+    
+    Args:
+        user_id: UUID of the user
+        start_time: Start of time window (inclusive, UTC+8 timezone-aware)
+        end_time: End of time window (inclusive, UTC+8 timezone-aware)
+        include_synthetic: Whether to include synthetic data (default: True)
+        Note: Currently synthetic flag is not stored, so this parameter is ignored
+    
+    Returns:
+        List of dictionaries with ModelSignal-like structure
+    """
+    try:
+        client = get_supabase_client()
+        malaysia_tz = get_malaysia_timezone()
+        
+        # Ensure timestamps are timezone-aware (UTC+8)
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=malaysia_tz)
+        else:
+            start_time = start_time.astimezone(malaysia_tz)
+        
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=malaysia_tz)
+        else:
+            end_time = end_time.astimezone(malaysia_tz)
+        
+        # Convert to ISO format strings for database query
+        start_time_str = start_time.isoformat()
+        end_time_str = end_time.isoformat()
+        
+        # Query database
+        query = client.table("face_emotion")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .gte("timestamp", start_time_str)\
+            .lte("timestamp", end_time_str)\
+            .order("timestamp", desc=False)
+        
+        response = query.execute()
+        
+        signals = []
+        for record in response.data:
+            # face_emotion uses predicted_emotion and emotion_confidence columns
+            emotion_label = record.get("predicted_emotion", "")
+            confidence = float(record.get("emotion_confidence", 0.0))
+            
+            # Validate emotion label (should be one of: Angry, Sad, Happy, Fear)
+            valid_emotions = ["Angry", "Sad", "Happy", "Fear"]
+            if emotion_label not in valid_emotions:
+                logger.debug(f"Skipping invalid emotion: {emotion_label}")
+                continue
+            
+            # Create ModelSignal-like dict
+            signal = {
+                "user_id": user_id,
+                "timestamp": record.get("timestamp", ""),
+                "modality": "face",
+                "emotion_label": emotion_label,
+                "confidence": confidence
+            }
+            signals.append(signal)
+        
+        logger.info(
+            f"Queried {len(signals)} face emotion signals for user {user_id} "
+            f"in window [{start_time_str}, {end_time_str}]"
+        )
+        return signals
+        
+    except Exception as e:
+        logger.error(f"Failed to query face emotion signals: {e}", exc_info=True)
+        return []
+
+
+def query_vitals_emotion_signals(
+    user_id: str,
+    start_time: datetime,
+    end_time: datetime,
+    include_synthetic: bool = True
+) -> List[Dict]:
+    """
+    Query bvs_emotion table and return ModelSignal-like dictionaries.
+    
+    Note: Queries bvs_emotion table for records with predicted_emotion and emotion_confidence columns.
+    
+    Args:
+        user_id: UUID of the user
+        start_time: Start of time window (inclusive, UTC+8 timezone-aware)
+        end_time: End of time window (inclusive, UTC+8 timezone-aware)
+        include_synthetic: Whether to include synthetic data (default: True)
+        Note: Currently synthetic flag is not stored, so this parameter is ignored
+    
+    Returns:
+        List of dictionaries with ModelSignal-like structure
+    """
+    try:
+        client = get_supabase_client()
+        malaysia_tz = get_malaysia_timezone()
+        
+        # Ensure timestamps are timezone-aware (UTC+8)
+        if start_time.tzinfo is None:
+            start_time = start_time.replace(tzinfo=malaysia_tz)
+        else:
+            start_time = start_time.astimezone(malaysia_tz)
+        
+        if end_time.tzinfo is None:
+            end_time = end_time.replace(tzinfo=malaysia_tz)
+        else:
+            end_time = end_time.astimezone(malaysia_tz)
+        
+        # Convert to ISO format strings for database query
+        start_time_str = start_time.isoformat()
+        end_time_str = end_time.isoformat()
+        
+        # Query bvs_emotion table for records with emotion predictions
+        # Note: timestamp and predicted_emotion columns exist, but emotion_confidence needs to be added
+        query = client.table("bvs_emotion")\
+            .select("*")\
+            .eq("user_id", user_id)\
+            .not_.is_("predicted_emotion", "null")\
+            .gte("timestamp", start_time_str)\
+            .lte("timestamp", end_time_str)\
+            .order("timestamp", desc=False)
+        
+        response = query.execute()
+        
+        signals = []
+        for record in response.data:
+            emotion_label = record.get("predicted_emotion", "")
+            # emotion_confidence column may not exist yet, default to 0.0 if missing
+            confidence_value = record.get("emotion_confidence")
+            confidence = float(confidence_value) if confidence_value is not None else 0.0
+            
+            # Validate emotion label
+            valid_emotions = ["Angry", "Sad", "Happy", "Fear"]
+            if emotion_label not in valid_emotions:
+                logger.debug(f"Skipping invalid emotion: {emotion_label}")
+                continue
+            
+            # Use timestamp if available, otherwise use date converted to timestamp
+            timestamp_value = record.get("timestamp")
+            if not timestamp_value:
+                # Fallback to date column
+                date_value = record.get("date")
+                if date_value:
+                    timestamp_value = f"{date_value}T00:00:00"
+            
+            # Create ModelSignal-like dict
+            signal = {
+                "user_id": user_id,
+                "timestamp": timestamp_value or "",
+                "modality": "vitals",
+                "emotion_label": emotion_label,
+                "confidence": confidence
+            }
+            signals.append(signal)
+        
+        logger.info(
+            f"Queried {len(signals)} vitals emotion signals for user {user_id} "
+            f"in window [{start_time_str}, {end_time_str}]"
+        )
+        return signals
+        
+    except Exception as e:
+        logger.error(f"Failed to query vitals emotion signals: {e}", exc_info=True)
+        return []
 
 
 def get_time_since_last_activity(user_id: str) -> float:

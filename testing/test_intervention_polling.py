@@ -4,15 +4,28 @@ Edge Device Polling Simulation Script
 
 This script simulates an edge device polling the intervention service every 15 minutes.
 It tests the full flow:
-1. Edge device calls POST /api/intervention/suggest
-2. Intervention calls Fusion service
-3. Fusion calls SER, FER, Vitals /predict endpoints
-4. Mock services read from JSON files and return signals
-5. Fusion fuses signals and writes to database
-6. Intervention reads from database
-7. Decision engine runs
-8. Suggestion engine runs
-9. Results returned to edge device
+
+1. Edge device calls POST /api/intervention/suggest with user_id
+2. Intervention service receives request
+3. Intervention calls Fusion service internally:
+   - Fusion calculates time window:
+     * Gets last_fusion_timestamp = MAX(emotion_log.timestamp) for user
+     * Calculates window_start = current_time - 15 minutes
+     * Effective start = max(last_fusion_timestamp, window_start)
+   - Fusion queries database:
+     * voice_emotion: timestamp > effective_start AND timestamp <= current_time
+     * face_emotion: timestamp > effective_start AND timestamp <= current_time
+     * bvs_emotion: timestamp > effective_start AND timestamp <= current_time
+   - Fusion runs fusion algorithm on collected signals
+   - Fusion writes result to emotional_log table with current timestamp
+4. Intervention reads latest emotion from emotional_log table
+5. Decision engine runs (kick-start logic)
+6. Suggestion engine runs (activity recommendations)
+7. Results returned to edge device
+
+IMPORTANT: This script triggers Fusion, which queries the database for signals and writes
+to emotional_log. Make sure signals exist in voice_emotion, face_emotion, and/or bvs_emotion
+tables before running this script, or use the simulation dashboard to generate signals.
 
 Usage:
     python testing/test_intervention_polling.py [--user-id UUID] [--interval SECONDS] [--once] [--verbose]
@@ -306,4 +319,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("\n\nScript interrupted by user")
         sys.exit(0)
+
 
