@@ -226,7 +226,7 @@ def auto_generate_signals_loop(service_name: str, modality: str, interval_second
     emotions = ["Sad", "Angry", "Happy", "Fear"]
     
     # Default user ID (can be overridden)
-    default_user_id = os.getenv("DEV_USER_ID", "8517c97f-66ef-4955-86ed-531013d33d3e")
+    default_user_id = os.getenv("DEV_USER_ID", "96975f52-5b05-4eb1-bfa5-530485112518")
     
     logger.info(f"[{service_name.upper()}] Auto-generation started (interval: {interval_seconds}s)")
     
