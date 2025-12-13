@@ -667,15 +667,15 @@ async def get_dashboard_status():
     try:
         # Read activity logs
         fusion_activities = activity_logger.read_activity_logs(
-            activity_logger.FUSION_LOG_DIR,
+            "fusion",
             limit=50
         )
         intervention_activities = activity_logger.read_activity_logs(
-            activity_logger.INTERVENTION_LOG_DIR,
+            "intervention",
             limit=50
         )
         context_activities = activity_logger.read_activity_logs(
-            activity_logger.CONTEXT_LOG_DIR,
+            "context",
             limit=50
         )
         

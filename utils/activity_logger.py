@@ -2,52 +2,52 @@
 Activity Logger Utility
 
 Provides centralized activity logging for fusion, intervention, and context services.
-Logs are written to JSONL files for easy parsing and dashboard display.
+Logs are stored in-memory for real-time dashboard monitoring (non-persistent).
 """
 
-import json
-import os
 import logging
 import threading
+from collections import deque
 from datetime import datetime
 from typing import Dict, Optional, Any
-from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-# Base directory for activity logs
-BASE_LOG_DIR = "data/activity_logs"
+# Maximum number of entries to keep in memory per service (auto-cleanup via deque maxlen)
+MAX_LOG_ENTRIES = 1000
 
-# Log directories for each service
-FUSION_LOG_DIR = os.path.join(BASE_LOG_DIR, "fusion")
-INTERVENTION_LOG_DIR = os.path.join(BASE_LOG_DIR, "intervention")
-CONTEXT_LOG_DIR = os.path.join(BASE_LOG_DIR, "context")
+# In-memory storage for activity logs (newest entries automatically replace oldest)
+_fusion_activities: deque = deque(maxlen=MAX_LOG_ENTRIES)
+_intervention_activities: deque = deque(maxlen=MAX_LOG_ENTRIES)
+_context_activities: deque = deque(maxlen=MAX_LOG_ENTRIES)
 
-# Locks for thread-safe file writing
+# Locks for thread-safe operations
 _fusion_lock = threading.Lock()
 _intervention_lock = threading.Lock()
 _context_lock = threading.Lock()
 
 
-def _ensure_log_dir(log_dir: str):
-    """Ensure log directory exists."""
-    os.makedirs(log_dir, exist_ok=True)
-
-
-def _get_log_file(log_dir: str, prefix: str) -> str:
+def _get_service_storage(service_name: str):
     """
-    Get log file path for today's date.
+    Get the appropriate storage deque and lock based on service_name.
     
     Args:
-        log_dir: Log directory path
-        prefix: File prefix (e.g., "fusion", "intervention")
+        service_name: Service identifier ("fusion", "intervention", "context")
     
     Returns:
-        Path to log file
+        Tuple of (deque, lock) for the service
     """
-    _ensure_log_dir(log_dir)
-    today = datetime.now().strftime("%Y%m%d")
-    return os.path.join(log_dir, f"{prefix}_activity_{today}.jsonl")
+    service_name_lower = service_name.lower()
+    if service_name_lower == "fusion" or "fusion" in service_name_lower:
+        return _fusion_activities, _fusion_lock
+    elif service_name_lower == "intervention" or "intervention" in service_name_lower:
+        return _intervention_activities, _intervention_lock
+    elif service_name_lower == "context" or "context" in service_name_lower:
+        return _context_activities, _context_lock
+    else:
+        # Default to fusion if unknown
+        logger.warning(f"Unknown service_name '{service_name}', defaulting to fusion")
+        return _fusion_activities, _fusion_lock
 
 
 def log_fusion_activity(
@@ -84,8 +84,6 @@ def log_fusion_activity(
         error: Error message (if failed)
         duration_seconds: Processing duration in seconds
     """
-    log_file = _get_log_file(FUSION_LOG_DIR, "fusion")
-    
     log_entry = {
         "timestamp": timestamp.isoformat(),
         "logged_at": datetime.now().isoformat(),
@@ -115,9 +113,8 @@ def log_fusion_activity(
     
     try:
         with _fusion_lock:
-            with open(log_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
-        logger.debug(f"Logged fusion activity to {log_file}")
+            _fusion_activities.append(log_entry)
+        logger.debug(f"Logged fusion activity (in-memory, {len(_fusion_activities)} entries)")
     except Exception as e:
         logger.warning(f"Failed to log fusion activity: {e}", exc_info=True)
 
@@ -155,8 +152,6 @@ def log_intervention_activity(
         error: Error message (if failed)
         duration_seconds: Processing duration in seconds
     """
-    log_file = _get_log_file(INTERVENTION_LOG_DIR, "intervention")
-    
     log_entry = {
         "timestamp": timestamp.isoformat(),
         "logged_at": datetime.now().isoformat(),
@@ -182,9 +177,8 @@ def log_intervention_activity(
     
     try:
         with _intervention_lock:
-            with open(log_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
-        logger.debug(f"Logged intervention activity to {log_file}")
+            _intervention_activities.append(log_entry)
+        logger.debug(f"Logged intervention activity (in-memory, {len(_intervention_activities)} entries)")
     except Exception as e:
         logger.warning(f"Failed to log intervention activity: {e}", exc_info=True)
 
@@ -226,8 +220,6 @@ def log_context_activity(
         facts_duration: Facts extraction duration
         context_duration: Context extraction duration
     """
-    log_file = _get_log_file(CONTEXT_LOG_DIR, "context")
-    
     log_entry = {
         "timestamp": timestamp.isoformat(),
         "logged_at": datetime.now().isoformat(),
@@ -255,74 +247,46 @@ def log_context_activity(
     
     try:
         with _context_lock:
-            with open(log_file, 'a', encoding='utf-8') as f:
-                f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
-        logger.debug(f"Logged context activity to {log_file}")
+            _context_activities.append(log_entry)
+        logger.debug(f"Logged context activity (in-memory, {len(_context_activities)} entries)")
     except Exception as e:
         logger.warning(f"Failed to log context activity: {e}", exc_info=True)
 
 
 def read_activity_logs(
-    log_dir: str,
+    service_name: str,
     limit: int = 100,
     user_id: Optional[str] = None
 ) -> list[Dict[str, Any]]:
     """
-    Read activity logs from directory.
+    Read activity logs from in-memory storage.
     
     Args:
-        log_dir: Log directory path
+        service_name: Service identifier ("fusion", "intervention", "context")
         limit: Maximum number of entries to return
         user_id: Optional filter by user_id
     
     Returns:
-        List of log entries (newest first)
+        List of log entries (newest first, already sorted by insertion order)
     """
-    if not os.path.exists(log_dir):
-        return []
-    
-    all_entries = []
-    
     try:
-        # Read all JSONL files in the directory
-        for log_file in Path(log_dir).glob("*.jsonl"):
-            try:
-                with open(log_file, 'r', encoding='utf-8') as f:
-                    for line in f:
-                        line = line.strip()
-                        if not line:
-                            continue
-                        try:
-                            entry = json.loads(line)
-                            # Filter by user_id if provided
-                            if user_id and entry.get("user_id") != user_id:
-                                continue
-                            all_entries.append(entry)
-                        except json.JSONDecodeError:
-                            continue
-            except Exception as e:
-                logger.warning(f"Error reading log file {log_file}: {e}")
-                continue
+        # Get the appropriate storage deque and lock
+        activities, lock = _get_service_storage(service_name)
         
-        # Sort by timestamp (newest first)
-        # Handle both ISO format strings and datetime objects
-        def get_sort_key(entry):
-            ts = entry.get("timestamp", "")
-            if isinstance(ts, str):
-                try:
-                    return datetime.fromisoformat(ts.replace('Z', '+00:00')).timestamp()
-                except Exception:
-                    return 0
-            elif isinstance(ts, datetime):
-                return ts.timestamp()
-            return 0
+        with lock:
+            # Convert deque to list (deque maintains insertion order, newest last)
+            # We want newest first, so reverse it
+            all_entries = list(activities)
+            all_entries.reverse()  # Newest first
         
-        all_entries.sort(key=get_sort_key, reverse=True)
+        # Filter by user_id if provided
+        if user_id:
+            all_entries = [entry for entry in all_entries if entry.get("user_id") == user_id]
         
-        # Return last N entries
+        # Return last N entries (already newest first)
         return all_entries[:limit]
         
     except Exception as e:
-        logger.error(f"Error reading activity logs from {log_dir}: {e}", exc_info=True)
+        logger.error(f"Error reading activity logs for service '{service_name}': {e}", exc_info=True)
         return []
 
