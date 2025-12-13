@@ -5,12 +5,6 @@
     "vitals": 0.3
   },
   "time_window_seconds": 60,
-  "model_timeout_seconds": 1.5,
-  "model_service_urls": {
-    "ser": "https://well-bot-emotionrecognition-520080168829.asia-south1.run.app",
-    "fer": "http://localhost:8006",
-    "vitals": "http://localhost:8007"
-  },
-  "simulation_service_url": "https://well-bot-emotionrecognition-520080168829.asia-south1.run.app"
+  "intervention_window_minutes": 15,
+  "model_timeout_seconds": 1.5
 }
-

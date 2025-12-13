@@ -60,8 +60,10 @@ async def call_fusion_service(user_id: str) -> Optional[dict]:
         result = await process_emotion_snapshot(request)
         
         # Handle NoSignalsResponse
-        if hasattr(result, 'status') and result.status == "no_signals":
-            logger.warning(f"Fusion service returned no signals: {result.reason}")
+        from fusion.models import NoSignalsResponse
+        if isinstance(result, NoSignalsResponse) or (hasattr(result, 'status') and result.status == "no_signals"):
+            reason = getattr(result, 'reason', 'no signals available')
+            logger.warning(f"Fusion service returned no signals: {reason}")
             return None
         
         # Convert FusedEmotionResponse to dict
@@ -87,11 +89,25 @@ async def call_fusion_service(user_id: str) -> Optional[dict]:
         # Fallback to HTTP if internal import fails
         logger.debug("Internal fusion call not available, using HTTP")
         pass
+    except ValueError as e:
+        # ValueError indicates a validation error - don't fallback, just fail
+        logger.error(f"Fusion service validation error: {e}")
+        raise
     except Exception as e:
-        logger.warning(f"Internal fusion call failed, falling back to HTTP: {e}")
+        # Log the full exception for debugging
+        logger.error(f"Internal fusion call failed: {e}", exc_info=True)
+        # Only fallback to HTTP if we're not in the same service
+        # Check if we're deployed (Cloud Run) - if so, internal call should work
+        # If internal call fails in same service, something is wrong - don't try HTTP
+        if os.getenv("K_SERVICE") or os.getenv("CLOUD_RUN_SERVICE"):
+            # We're in Cloud Run, internal call should work - re-raise the exception
+            logger.error("Internal fusion call failed in Cloud Run - this should not happen")
+            raise
+        # Otherwise, try HTTP fallback (for local development with separate services)
+        logger.warning("Falling back to HTTP call (local development mode)")
         pass
     
-    # Fallback to HTTP call
+    # Fallback to HTTP call (only for local development with separate services)
     fusion_url = os.getenv("FUSION_SERVICE_URL", "http://localhost:8000")
     fusion_endpoint = f"{fusion_url}/emotion/snapshot"
     
@@ -122,6 +138,10 @@ async def call_fusion_service(user_id: str) -> Optional[dict]:
             )
             return result
             
+    except httpx.ConnectError as e:
+        logger.error(f"Failed to connect to fusion service at {fusion_endpoint}: {e}")
+        logger.error("If running in Cloud Run, internal call should be used instead of HTTP")
+        return None
     except httpx.TimeoutException:
         logger.warning(f"Fusion service call timed out after 30s")
         return None

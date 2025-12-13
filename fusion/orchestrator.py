@@ -14,10 +14,9 @@ This module orchestrates the complete emotion fusion flow:
 import logging
 import asyncio
 from typing import Optional, Dict, List, Union
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fusion.models import EmotionSnapshotRequest, FusedEmotionResponse, NoSignalsResponse, SignalUsed, ModelSignal, EmotionSnapshotDemoRequest
-from fusion.model_clients import SERClient, FERClient, VitalsClient
 from fusion.fusion_logic import fuse_signals
 from fusion.config_loader import load_config
 from utils import database
@@ -28,6 +27,7 @@ logger = logging.getLogger(__name__)
 # Load configuration
 _config = load_config()
 _time_window = _config.get("time_window_seconds", 60)
+_intervention_window_minutes = _config.get("intervention_window_minutes", 15)
 
 
 def validate_snapshot_request(request: EmotionSnapshotRequest) -> None:
@@ -88,80 +88,149 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
             # Use current time in UTC+8
             snapshot_timestamp = database.get_current_time_utc8()
         
-        # Get window_seconds from request options or config
+        # Get window_seconds from request options or config (for backward compatibility)
         window_seconds = request.options.window_seconds if request.options else None
         window_seconds = window_seconds or _time_window
         
         # Get timeout override if provided
         timeout_override = request.options.timeout_seconds if request.options else None
         
-        logger.info(f"Snapshot timestamp: {snapshot_timestamp.isoformat()}, window: {window_seconds}s")
-        
         # Track start time for duration
         fusion_start_time = datetime.now()
         
-        # Step 2: Call model services in parallel
-        # Initialize clients with optional timeout override
-        ser_client = SERClient(timeout=timeout_override)
-        fer_client = FERClient(timeout=timeout_override)
-        vitals_client = VitalsClient(timeout=timeout_override)
+        # Step 2: Calculate effective time window for querying signals
+        # Get last Fusion timestamp (last emotion_log entry for this user)
+        last_fusion_timestamp = database.get_last_emotion_log_timestamp(request.user_id)
         
-        logger.info(f"Calling model services in parallel for user {request.user_id}...")
-        logger.info(f"  SER endpoint: {ser_client.service_url}/predict")
-        logger.info(f"  FER endpoint: {fer_client.service_url}/predict")
-        logger.info(f"  Vitals endpoint: {vitals_client.service_url}/predict")
+        # Calculate 15-minute window before current fusion call
+        intervention_window_start = snapshot_timestamp - timedelta(minutes=_intervention_window_minutes)
         
-        # Call all clients concurrently
-        ser_task = ser_client.predict(request.user_id, snapshot_timestamp, window_seconds)
-        fer_task = fer_client.predict(request.user_id, snapshot_timestamp, window_seconds)
-        vitals_task = vitals_client.predict(request.user_id, snapshot_timestamp, window_seconds)
+        # Determine effective window start:
+        # - If last Fusion exists: use max(last_fusion_timestamp, intervention_window_start)
+        # - If no last Fusion: use intervention_window_start
+        # This ensures we only process unprocessed signals AND limit to 15-minute window
+        if last_fusion_timestamp is not None:
+            effective_start = max(last_fusion_timestamp, intervention_window_start)
+            logger.info(
+                f"Last Fusion timestamp: {last_fusion_timestamp.isoformat()}, "
+                f"15-min window start: {intervention_window_start.isoformat()}, "
+                f"Effective start: {effective_start.isoformat()}"
+            )
+        else:
+            effective_start = intervention_window_start
+            logger.info(
+                f"No previous Fusion runs found. Using 15-min window start: {effective_start.isoformat()}"
+            )
         
-        ser_signals, fer_signals, vitals_signals = await asyncio.gather(
-            ser_task,
-            fer_task,
-            vitals_task,
+        # Ensure effective_start doesn't exceed snapshot_timestamp
+        if effective_start > snapshot_timestamp:
+            effective_start = snapshot_timestamp
+            logger.warning(
+                f"Effective start exceeds snapshot timestamp, using snapshot timestamp: {effective_start.isoformat()}"
+            )
+        
+        logger.info(f"Snapshot timestamp: {snapshot_timestamp.isoformat()}")
+        logger.info(f"Querying database for signals in time window for user {request.user_id}...")
+        logger.info(f"  Window: [{effective_start.isoformat()}, {snapshot_timestamp.isoformat()}]")
+        logger.info(f"  Condition: signals after last Fusion ({last_fusion_timestamp.isoformat() if last_fusion_timestamp else 'none'}) AND within {_intervention_window_minutes} minutes")
+        
+        # Query all three tables in parallel (using asyncio for concurrent DB queries)
+        # Note: Database queries are synchronous, but we can still use asyncio.gather for parallel execution
+        # by wrapping them in async functions
+        # Use effective_start instead of window_start_dt
+        async def query_ser():
+            return database.query_voice_emotion_signals(
+                request.user_id, effective_start, snapshot_timestamp, include_synthetic=True
+            )
+        
+        async def query_fer():
+            return database.query_face_emotion_signals(
+                request.user_id, effective_start, snapshot_timestamp, include_synthetic=True
+            )
+        
+        async def query_vitals():
+            return database.query_vitals_emotion_signals(
+                request.user_id, effective_start, snapshot_timestamp, include_synthetic=True
+            )
+        
+        # Run queries concurrently
+        ser_signals_dicts, fer_signals_dicts, vitals_signals_dicts = await asyncio.gather(
+            query_ser(),
+            query_fer(),
+            query_vitals(),
             return_exceptions=True
         )
         
-        # Handle exceptions from any client and log results
+        # Handle exceptions and convert dicts to ModelSignal objects
         ser_signals_list = []
         fer_signals_list = []
         vitals_signals_list = []
-        
-        if isinstance(ser_signals, Exception):
-            logger.warning(f"SER client raised exception: {ser_signals}")
-            ser_signals = []
-        else:
-            ser_signals_list = [{"emotion_label": s.emotion_label, "confidence": s.confidence, "timestamp": s.timestamp} for s in ser_signals]
-            logger.info(f"SER returned {len(ser_signals)} signals: {ser_signals_list}")
-        
-        if isinstance(fer_signals, Exception):
-            logger.warning(f"FER client raised exception: {fer_signals}")
-            fer_signals = []
-        else:
-            fer_signals_list = [{"emotion_label": s.emotion_label, "confidence": s.confidence, "timestamp": s.timestamp} for s in fer_signals]
-            logger.info(f"FER returned {len(fer_signals)} signals: {fer_signals_list}")
-        
-        if isinstance(vitals_signals, Exception):
-            logger.warning(f"Vitals client raised exception: {vitals_signals}")
-            vitals_signals = []
-        else:
-            vitals_signals_list = [{"emotion_label": s.emotion_label, "confidence": s.confidence, "timestamp": s.timestamp} for s in vitals_signals]
-            logger.info(f"Vitals returned {len(vitals_signals)} signals: {vitals_signals_list}")
-        
-        # Combine all signals
         all_signals: List[ModelSignal] = []
-        all_signals.extend(ser_signals)
-        all_signals.extend(fer_signals)
-        all_signals.extend(vitals_signals)
+        
+        if isinstance(ser_signals_dicts, Exception):
+            logger.warning(f"SER query raised exception: {ser_signals_dicts}")
+            ser_signals_dicts = []
+        else:
+            ser_signals_list = [{"emotion_label": s["emotion_label"], "confidence": s["confidence"], "timestamp": s["timestamp"]} for s in ser_signals_dicts]
+            logger.info(f"SER query returned {len(ser_signals_dicts)} signals: {ser_signals_list}")
+            # Convert dicts to ModelSignal objects
+            for s_dict in ser_signals_dicts:
+                signal = ModelSignal(
+                    user_id=s_dict["user_id"],
+                    timestamp=s_dict["timestamp"],
+                    modality=s_dict["modality"],
+                    emotion_label=s_dict["emotion_label"],
+                    confidence=s_dict["confidence"]
+                )
+                all_signals.append(signal)
+        
+        if isinstance(fer_signals_dicts, Exception):
+            logger.warning(f"FER query raised exception: {fer_signals_dicts}")
+            fer_signals_dicts = []
+        else:
+            fer_signals_list = [{"emotion_label": s["emotion_label"], "confidence": s["confidence"], "timestamp": s["timestamp"]} for s in fer_signals_dicts]
+            logger.info(f"FER query returned {len(fer_signals_dicts)} signals: {fer_signals_list}")
+            # Convert dicts to ModelSignal objects
+            for s_dict in fer_signals_dicts:
+                signal = ModelSignal(
+                    user_id=s_dict["user_id"],
+                    timestamp=s_dict["timestamp"],
+                    modality=s_dict["modality"],
+                    emotion_label=s_dict["emotion_label"],
+                    confidence=s_dict["confidence"]
+                )
+                all_signals.append(signal)
+        
+        if isinstance(vitals_signals_dicts, Exception):
+            logger.warning(f"Vitals query raised exception: {vitals_signals_dicts}")
+            vitals_signals_dicts = []
+        else:
+            vitals_signals_list = [{"emotion_label": s["emotion_label"], "confidence": s["confidence"], "timestamp": s["timestamp"]} for s in vitals_signals_dicts]
+            logger.info(f"Vitals query returned {len(vitals_signals_dicts)} signals: {vitals_signals_list}")
+            # Convert dicts to ModelSignal objects
+            for s_dict in vitals_signals_dicts:
+                signal = ModelSignal(
+                    user_id=s_dict["user_id"],
+                    timestamp=s_dict["timestamp"],
+                    modality=s_dict["modality"],
+                    emotion_label=s_dict["emotion_label"],
+                    confidence=s_dict["confidence"]
+                )
+                all_signals.append(signal)
+        
+        # Set counts for logging
+        ser_signals = [s for s in all_signals if s.modality == "speech"]
+        fer_signals = [s for s in all_signals if s.modality == "face"]
+        vitals_signals = [s for s in all_signals if s.modality == "vitals"]
         
         logger.info(f"Collected {len(all_signals)} total signals "
                    f"(SER: {len(ser_signals)}, FER: {len(fer_signals)}, Vitals: {len(vitals_signals)})")
         
-        # Step 3: Filter signals by time window (already done by model clients, but double-check)
-        # The model clients should have already filtered, but we'll validate timestamps are within window
+        # Step 3: Signals are already filtered by time window in database queries
+        # Double-check timestamps are within effective window (safety check)
         filtered_signals = []
-        window_start = snapshot_timestamp.timestamp() - window_seconds
+        effective_start_ts = effective_start.timestamp()
+        snapshot_ts = snapshot_timestamp.timestamp()
         
         for signal in all_signals:
             try:
@@ -172,16 +241,17 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
                     signal_timestamp = signal_timestamp.astimezone(database.get_malaysia_timezone())
                 
                 signal_ts = signal_timestamp.timestamp()
-                if signal_ts >= window_start:
+                # Signal must be after effective_start and before/equal to snapshot_timestamp
+                if effective_start_ts < signal_ts <= snapshot_ts:
                     filtered_signals.append(signal)
                 else:
-                    logger.debug(f"Filtered out stale signal: {signal.timestamp} (outside {window_seconds}s window)")
+                    logger.debug(f"Filtered out signal outside effective window: {signal.timestamp} (window: [{effective_start.isoformat()}, {snapshot_timestamp.isoformat()}])")
             except Exception as e:
                 logger.warning(f"Failed to parse signal timestamp {signal.timestamp}: {e}")
-                # Include it anyway (model clients should have validated)
+                # Include it anyway (database query should have validated)
                 filtered_signals.append(signal)
         
-        logger.debug(f"After time window filtering: {len(filtered_signals)} signals")
+        logger.debug(f"After time window validation: {len(filtered_signals)} signals")
         
         # Step 4: Check minimum signals requirement
         if not filtered_signals:
