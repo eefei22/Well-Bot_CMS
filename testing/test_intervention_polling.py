@@ -48,7 +48,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Configuration
-DEFAULT_USER_ID = os.getenv("DEV_USER_ID", "8517c97f-66ef-4955-86ed-531013d33d3e")
+DEFAULT_USER_ID = os.getenv("DEV_USER_ID", "96975f52-5b05-4eb1-bfa5-530485112518")
 DEFAULT_BASE_URL = os.getenv("FUSION_SERVICE_URL", "http://localhost:8000")
 DEFAULT_INTERVAL = 15 * 60  # 15 minutes in seconds
 

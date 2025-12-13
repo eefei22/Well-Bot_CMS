@@ -40,7 +40,7 @@ SER_ENDPOINT = "/ser/analyze-speech"
 SER_TIMEOUT = 30
 
 # Default test user ID
-DEFAULT_USER_ID = "8517c97f-66ef-4955-86ed-531013d33d3e"
+DEFAULT_USER_ID = "96975f52-5b05-4eb1-bfa5-530485112518"
 
 
 def capture_audio_from_mic(duration_seconds: float, sample_rate: int = 16000, chunk_size: int = 1600) -> Optional[list]:

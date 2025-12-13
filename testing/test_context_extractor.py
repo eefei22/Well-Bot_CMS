@@ -23,7 +23,7 @@ def test_process_user_context():
         print("Error: DEV_USER_ID environment variable is not set")
         print("Please set DEV_USER_ID in your .env file")
         print("\nExample:")
-        print("DEV_USER_ID=8517c97f-66ef-4955-86ed-531013d33d3e")
+        print("DEV_USER_ID=96975f52-5b05-4eb1-bfa5-530485112518")
         sys.exit(1)
     
     # Check if API key is set

@@ -5,7 +5,7 @@
 # py -3.12 -m venv venv
 
 # export FUSION_SERVICE_URL=https://user-context-well-bot-520080168829.asia-south1.run.app
-# export DEV_USER_ID=8517c97f-66ef-4955-86ed-531013d33d3e
+# export DEV_USER_ID=96975f52-5b05-4eb1-bfa5-530485112518
 # Run demo script
 # python testing/test_intervention_polling.py
 
