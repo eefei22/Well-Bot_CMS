@@ -27,6 +27,67 @@ FUSION_WEIGHTS = {
 VALID_EMOTIONS = ["Angry", "Sad", "Happy", "Fear"]
 
 
+def calculate_mood_score(emotion_confidences: Dict[str, float]) -> int:
+    """
+    Calculate balanced mood score from emotion confidences using balanced average approach.
+    
+    This computes overall emotional valence (positive vs negative) by:
+    1. Averaging negative emotions (Sad, Angry, Fear) to balance against single positive (Happy)
+    2. Computing net mood: positive - average_negative
+    3. Scaling to 0-100 range (0=very negative, 50=neutral, 100=very positive)
+    
+    Args:
+        emotion_confidences: Dictionary mapping emotion labels to normalized confidence scores (0.0-1.0)
+            Keys: "Happy", "Sad", "Angry", "Fear"
+            Values: Normalized confidence (float 0.0-1.0)
+            Missing emotions are treated as 0.0
+    
+    Returns:
+        Integer mood score (0-100) representing overall emotional valence
+    """
+    # Extract emotion confidences (default to 0.0 if missing)
+    happy_confidence = emotion_confidences.get("Happy", 0.0)
+    sad_confidence = emotion_confidences.get("Sad", 0.0)
+    anger_confidence = emotion_confidences.get("Angry", 0.0)
+    fear_confidence = emotion_confidences.get("Fear", 0.0)
+    
+    # Build lists of present negative emotions
+    negative_values = []
+    if sad_confidence > 0.0:
+        negative_values.append(sad_confidence)
+    if anger_confidence > 0.0:
+        negative_values.append(anger_confidence)
+    if fear_confidence > 0.0:
+        negative_values.append(fear_confidence)
+    
+    # Handle edge case: no emotions present (all 0.0)
+    if happy_confidence == 0.0 and len(negative_values) == 0:
+        return 50  # Neutral mood
+    
+    # Calculate average negative emotion
+    if len(negative_values) > 0:
+        avg_negative = sum(negative_values) / len(negative_values)
+    else:
+        avg_negative = 0.0
+    
+    # Calculate raw mood (-1 to +1 range)
+    raw_mood = happy_confidence - avg_negative
+    
+    # Clamp raw_mood between -1 and +1
+    raw_mood = max(-1.0, min(raw_mood, 1.0))
+    
+    # Scale to 0-100 range
+    mood_score = int(round((raw_mood + 1) * 50))
+    
+    logger.debug(
+        f"Mood score calculation: Happy={happy_confidence:.3f}, "
+        f"Negatives=[Sad={sad_confidence:.3f}, Angry={anger_confidence:.3f}, Fear={fear_confidence:.3f}], "
+        f"AvgNegative={avg_negative:.3f}, RawMood={raw_mood:.3f}, MoodScore={mood_score}"
+    )
+    
+    return mood_score
+
+
 def fuse_signals(signals: List[ModelSignal], weights: Optional[Dict[str, float]] = None) -> Dict:
     """
     Fuse multiple emotion signals using weighted aggregation.
@@ -38,7 +99,7 @@ def fuse_signals(signals: List[ModelSignal], weights: Optional[Dict[str, float]]
     4. Calculate weighted score per emotion: sum(modality_avg_confidence * weight)
     5. Select emotion with highest score
     6. Normalize confidence_score to [0, 1]
-    7. Map to emotional_score [0, 100]
+    7. Calculate emotional_score [0, 100] using balanced mood score from all emotions
     
     Args:
         signals: List of ModelSignal objects from different modalities
@@ -48,7 +109,7 @@ def fuse_signals(signals: List[ModelSignal], weights: Optional[Dict[str, float]]
         Dictionary with:
         - emotion_label: str
         - confidence_score: float (0.0 to 1.0)
-        - emotional_score: int (0 to 100)
+        - emotional_score: int (0 to 100) - overall mood valence score (0=very negative, 50=neutral, 100=very positive)
         - signals_used: List[Dict] with modality, emotion_label, confidence
     """
     if not signals:
@@ -123,8 +184,19 @@ def fuse_signals(signals: List[ModelSignal], weights: Optional[Dict[str, float]]
     else:
         confidence_score = 0.0
     
-    # Step 7: Map to emotional_score [0, 100]
-    emotional_score = int(round(confidence_score * 100))
+    # Step 7: Calculate emotional_score [0, 100] using balanced mood score
+    # Normalize all emotion weighted scores to get confidences for mood calculation
+    normalized_emotion_confidences = {}
+    for emotion, raw_weighted_score in emotion_weighted_scores.items():
+        normalized_emotion_confidences[emotion] = min(raw_weighted_score / contributing_weights_sum, 1.0)
+    
+    # Initialize missing emotions to 0.0
+    for emotion in VALID_EMOTIONS:
+        if emotion not in normalized_emotion_confidences:
+            normalized_emotion_confidences[emotion] = 0.0
+    
+    # Calculate mood score from all normalized emotion confidences
+    emotional_score = calculate_mood_score(normalized_emotion_confidences)
     
     # Build signals_used list for response
     signals_used = []
@@ -143,7 +215,7 @@ def fuse_signals(signals: List[ModelSignal], weights: Optional[Dict[str, float]]
         "signals_used": signals_used
     }
     
-    logger.info(f"Fused result: {emotion_label} (confidence: {confidence_score:.3f}, emotional_score: {emotional_score})")
+    logger.info(f"Fused result: {emotion_label} (confidence: {confidence_score:.3f}, emotional_score: {emotional_score}) - mood valence score")
     
     return result
 
