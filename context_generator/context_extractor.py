@@ -125,6 +125,13 @@ def process_user_context(user_id: str, model_tag: str = 'e5') -> str:
     
     logger.info(f"Retrieved {len(message_texts)} message texts")
     
+    # #region agent log
+    import json
+    sample_messages = list(message_texts.values())[:5]
+    with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+        f.write(json.dumps({"location":"context_extractor.py:process_user_context:messages_retrieved","message":"Message texts retrieved","data":{"user_id":user_id,"total_messages":len(message_texts),"sample_messages":sample_messages},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3B"}, ensure_ascii=False) + '\n')
+    # #endregion
+    
     # Format messages for LLM prompt
     messages_text = "\n".join([f"- {text}" for text in message_texts.values()])
     
@@ -161,7 +168,18 @@ def process_user_context(user_id: str, model_tag: str = 'e5') -> str:
     logger.info("Generating daily life context summary with LLM")
     try:
         messages_for_llm = [{"role": "user", "content": prompt}]
+        
+        # #region agent log
+        with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"location":"context_extractor.py:process_user_context:before_llm","message":"Before LLM call","data":{"user_id":user_id,"prompt_length":len(prompt),"prompt_preview":prompt[:300]},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3A"}, ensure_ascii=False) + '\n')
+        # #endregion
+        
         context_summary = client.chat(messages_for_llm)
+        
+        # #region agent log
+        with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"location":"context_extractor.py:process_user_context:after_llm","message":"LLM response received","data":{"user_id":user_id,"summary_length":len(context_summary) if context_summary else 0,"summary_preview":context_summary[:300] if context_summary else None},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3A,H3C"}, ensure_ascii=False) + '\n')
+        # #endregion
         
         if not context_summary:
             raise ValueError("LLM returned empty context summary")

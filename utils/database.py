@@ -211,6 +211,12 @@ def write_users_context_bundle(user_id: str, persona_summary: str = None, facts:
     Returns:
         True if write/update succeeded, False otherwise
     """
+    # #region agent log
+    import json
+    with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+        f.write(json.dumps({"location":"database.py:write_users_context_bundle:entry","message":"Database write called","data":{"user_id":user_id,"has_persona_summary":persona_summary is not None,"has_facts":facts is not None,"persona_summary_length":len(persona_summary) if persona_summary else 0,"facts_length":len(facts) if facts else 0},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H1A,H1B,H1C"}) + '\n')
+    # #endregion
+    
     try:
         client = get_supabase_client()
         payload = {
@@ -223,19 +229,53 @@ def write_users_context_bundle(user_id: str, persona_summary: str = None, facts:
         if facts is not None:
             payload["facts"] = facts
         
+        # #region agent log
+        with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"location":"database.py:write_users_context_bundle:before_upsert","message":"Payload prepared","data":{"user_id":user_id,"payload_keys":list(payload.keys())},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H1C"}) + '\n')
+        # #endregion
+        
         # Use upsert to insert or update (since user_id is primary key)
         response = client.table("users_context_bundle")\
             .upsert(payload, on_conflict="user_id")\
             .execute()
         
+        # #region agent log
+        with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"location":"database.py:write_users_context_bundle:after_upsert","message":"Upsert executed","data":{"user_id":user_id,"has_response_data":response.data is not None,"response_data_length":len(response.data) if response.data else 0,"response_data":str(response.data)[:500] if response.data else None},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H1A,H1B,H1C"}) + '\n')
+        # #endregion
+        
         if response.data:
             logger.info(f"Successfully wrote/updated context bundle for user {user_id}")
+            
+            # #region agent log
+            # Verify by reading back
+            try:
+                verify_response = client.table("users_context_bundle").select("*").eq("user_id", user_id).execute()
+                with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({"location":"database.py:write_users_context_bundle:verify_read","message":"Verification read","data":{"user_id":user_id,"found_in_db":len(verify_response.data) > 0 if verify_response.data else False,"verify_data":str(verify_response.data)[:500] if verify_response.data else None},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H1D"}) + '\n')
+            except Exception as ve:
+                with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                    f.write(json.dumps({"location":"database.py:write_users_context_bundle:verify_error","message":"Verification read failed","data":{"user_id":user_id,"error":str(ve)},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H1D"}) + '\n')
+            # #endregion
+            
             return True
         else:
             logger.warning(f"No data returned for context bundle update for user {user_id}")
+            
+            # #region agent log
+            with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+                f.write(json.dumps({"location":"database.py:write_users_context_bundle:no_data","message":"No data returned from upsert","data":{"user_id":user_id},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H1A,H1B"}) + '\n')
+            # #endregion
+            
             return False
     except Exception as e:
         logger.error(f"Failed to write context bundle for user {user_id}: {e}")
+        
+        # #region agent log
+        with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"location":"database.py:write_users_context_bundle:exception","message":"Exception in write","data":{"user_id":user_id,"error":str(e),"error_type":type(e).__name__},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H1B,H1C"}) + '\n')
+        # #endregion
+        
         return False
 
 

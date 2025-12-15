@@ -125,6 +125,13 @@ def extract_user_facts(user_id: str, model_tag: str = 'e5') -> str:
     
     logger.info(f"Retrieved {len(message_texts)} message texts")
     
+    # #region agent log
+    import json
+    sample_messages_facts = list(message_texts.values())[:5]
+    with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+        f.write(json.dumps({"location":"facts_extractor.py:extract_user_facts:messages_retrieved","message":"Message texts retrieved for facts","data":{"user_id":user_id,"total_messages":len(message_texts),"sample_messages":sample_messages_facts},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3B"}, ensure_ascii=False) + '\n')
+    # #endregion
+    
     # Format messages for LLM prompt
     messages_text = "\n".join([f"- {text}" for text in message_texts.values()])
     
@@ -143,7 +150,7 @@ def extract_user_facts(user_id: str, model_tag: str = 'e5') -> str:
             User Messages:  
             {messages_text}
 
-            Please output a **structured**, **detailed** summary of the user’s facts in clearly-labelled bullet points by category.  
+            Please output a **structured**, **detailed** summary of the user's facts in clearly-labelled bullet points by category.  
             Important constraints:  
             • Produce the facts in the same language as the user messages.
             • Only include items you can reasonably infer.  
@@ -160,7 +167,18 @@ def extract_user_facts(user_id: str, model_tag: str = 'e5') -> str:
     logger.info("Generating persona facts with LLM")
     try:
         messages_for_llm = [{"role": "user", "content": prompt}]
+        
+        # #region agent log
+        with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"location":"facts_extractor.py:extract_user_facts:before_llm","message":"Before LLM call for facts","data":{"user_id":user_id,"prompt_length":len(prompt),"prompt_preview":prompt[:300]},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3A"}, ensure_ascii=False) + '\n')
+        # #endregion
+        
         facts_summary = client.chat(messages_for_llm)
+        
+        # #region agent log
+        with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
+            f.write(json.dumps({"location":"facts_extractor.py:extract_user_facts:after_llm","message":"LLM response received for facts","data":{"user_id":user_id,"summary_length":len(facts_summary) if facts_summary else 0,"summary_preview":facts_summary[:300] if facts_summary else None},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3A,H3C"}, ensure_ascii=False) + '\n')
+        # #endregion
         
         if not facts_summary:
             raise ValueError("LLM returned empty facts summary")
