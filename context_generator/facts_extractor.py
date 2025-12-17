@@ -136,8 +136,22 @@ def extract_user_facts(user_id: str, model_tag: str = 'e5') -> str:
     messages_text = "\n".join([f"- {text}" for text in message_texts.values()])
     
     # Detect message language by sampling first few messages
-    has_chinese_facts = any('\u4e00' <= char <= '\u9fff' for char in sample_messages_facts[0] if sample_messages_facts else "")
-    detected_language_facts = "Chinese" if has_chinese_facts else "English"
+    # Check for Chinese characters
+    sample_text_facts = " ".join(sample_messages_facts[:3]) if len(sample_messages_facts) >= 3 else (sample_messages_facts[0] if sample_messages_facts else "")
+    has_chinese_facts = any('\u4e00' <= char <= '\u9fff' for char in sample_text_facts)
+    
+    # Check for common Malay words (case insensitive)
+    malay_indicators_facts = ['yang', 'saya', 'adalah', 'untuk', 'dengan', 'tidak', 'ini', 'itu', 'ada', 'pada', 'mereka', 'akan']
+    sample_lower_facts = sample_text_facts.lower()
+    malay_word_count_facts = sum(1 for word in malay_indicators_facts if f' {word} ' in f' {sample_lower_facts} ' or sample_lower_facts.startswith(f'{word} ') or sample_lower_facts.endswith(f' {word}'))
+    
+    # Determine language
+    if has_chinese_facts:
+        detected_language_facts = "Chinese"
+    elif malay_word_count_facts >= 2:  # If at least 2 Malay indicators found
+        detected_language_facts = "Malay"
+    else:
+        detected_language_facts = "English"
     
     # Create prompt for persona facts extraction with STRONG language enforcement
     prompt = f"""You are an intelligent user-profiling assistant.  
@@ -148,6 +162,7 @@ def extract_user_facts(user_id: str, model_tag: str = 'e5') -> str:
             - You MUST write your entire response ONLY in {detected_language_facts}
             - If messages are in English, respond in English
             - If messages are in Chinese, respond in Chinese
+            - If messages are in Malay (Bahasa Melayu), respond in Malay
             - Do NOT switch languages under any circumstances
 
             Focus on these categories:  
