@@ -125,44 +125,39 @@ def extract_user_facts(user_id: str, model_tag: str = 'e5') -> str:
     
     logger.info(f"Retrieved {len(message_texts)} message texts")
     
-    # #region agent log
-    import json
-    sample_messages_facts = list(message_texts.values())[:5]
-    with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
-        f.write(json.dumps({"location":"facts_extractor.py:extract_user_facts:messages_retrieved","message":"Message texts retrieved for facts","data":{"user_id":user_id,"total_messages":len(message_texts),"sample_messages":sample_messages_facts},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3B"}, ensure_ascii=False) + '\n')
-    # #endregion
-    
     # Format messages for LLM prompt
     messages_text = "\n".join([f"- {text}" for text in message_texts.values()])
     
-    # Detect message language by sampling first few messages
-    # Check for Chinese characters
-    sample_text_facts = " ".join(sample_messages_facts[:3]) if len(sample_messages_facts) >= 3 else (sample_messages_facts[0] if sample_messages_facts else "")
-    has_chinese_facts = any('\u4e00' <= char <= '\u9fff' for char in sample_text_facts)
+    # Fetch user's preferred language from database (instead of detecting from messages)
+    language_code = database.get_user_language(user_id)
     
-    # Check for common Malay words (case insensitive)
-    malay_indicators_facts = ['yang', 'saya', 'adalah', 'untuk', 'dengan', 'tidak', 'ini', 'itu', 'ada', 'pada', 'mereka', 'akan']
-    sample_lower_facts = sample_text_facts.lower()
-    malay_word_count_facts = sum(1 for word in malay_indicators_facts if f' {word} ' in f' {sample_lower_facts} ' or sample_lower_facts.startswith(f'{word} ') or sample_lower_facts.endswith(f' {word}'))
-    
-    # Determine language
-    if has_chinese_facts:
-        detected_language_facts = "Chinese"
-    elif malay_word_count_facts >= 2:  # If at least 2 Malay indicators found
-        detected_language_facts = "Malay"
-    else:
-        detected_language_facts = "English"
+    # Map language code/name to human-readable name for LLM prompt
+    # Support both codes (en, zh, ms) and full names (English, Chinese, Malay)
+    language_map = {
+        "en": "English",
+        "zh": "Chinese",
+        "ms": "Malay",
+        "zh-CN": "Chinese",
+        "zh-TW": "Chinese",
+        "ms-MY": "Malay",
+        # Also support full language names directly
+        "English": "English",
+        "Chinese": "Chinese",
+        "Malay": "Malay"
+    }
+    preferred_language = language_map.get(language_code, "English")  # Default to English if unknown code
     
     # Create prompt for persona facts extraction with STRONG language enforcement
     prompt = f"""You are an intelligent user-profiling assistant.  
             Analyze the following user messages and extract their stable persona characteristics and factual context.
 
             CRITICAL LANGUAGE REQUIREMENT:
-            - The user messages below are written in {detected_language_facts}
-            - You MUST write your entire response ONLY in {detected_language_facts}
-            - If messages are in English, respond in English
-            - If messages are in Chinese, respond in Chinese
-            - If messages are in Malay (Bahasa Melayu), respond in Malay
+            - The user's preferred language is {preferred_language}
+            - You MUST write your entire response ONLY in {preferred_language}
+            - IGNORE the language of the user messages below
+            - If preferred language is English, respond in English
+            - If preferred language is Chinese, respond in Chinese
+            - If preferred language is Malay (Bahasa Melayu), respond in Malay
             - Do NOT switch languages under any circumstances
 
             Focus on these categories:  
@@ -178,33 +173,22 @@ def extract_user_facts(user_id: str, model_tag: str = 'e5') -> str:
 
             Please output a **structured**, **detailed** summary of the user's facts in clearly-labelled bullet points by category.  
             Important constraints:  
-            • Output MUST be in {detected_language_facts} (same language as the user messages above)
+            • Output MUST be in {preferred_language} (the user's preferred language)
             • Only include items you can reasonably infer.  
             • Do **not** include additional justification or long explanations.  
 
-            Output only the summary in {detected_language_facts}.
+            Output only the summary in {preferred_language}.
             """
 
-    # Initialize LLM client with longer timeout for reasoning model
-    logger.info("Initializing DeepSeek client (reasoning model may take 1-3 minutes)")
+    # Initialize LLM client
+    logger.info("Initializing DeepSeek client (chat model)")
     client = DeepSeekClient(api_key=api_key, model="deepseek-reasoner", timeout=180.0)
     
     # Generate persona facts using LLM
     logger.info("Generating persona facts with LLM")
     try:
         messages_for_llm = [{"role": "user", "content": prompt}]
-        
-        # #region agent log
-        with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"location":"facts_extractor.py:extract_user_facts:before_llm","message":"Before LLM call for facts","data":{"user_id":user_id,"detected_language":detected_language_facts,"prompt_length":len(prompt),"prompt_preview":prompt[:300]},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3A"}, ensure_ascii=False) + '\n')
-        # #endregion
-        
         facts_summary = client.chat(messages_for_llm)
-        
-        # #region agent log
-        with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"location":"facts_extractor.py:extract_user_facts:after_llm","message":"LLM response received for facts","data":{"user_id":user_id,"summary_length":len(facts_summary) if facts_summary else 0,"summary_preview":facts_summary[:300] if facts_summary else None},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3A,H3C"}, ensure_ascii=False) + '\n')
-        # #endregion
         
         if not facts_summary:
             raise ValueError("LLM returned empty facts summary")
