@@ -135,10 +135,21 @@ def process_user_context(user_id: str, model_tag: str = 'e5') -> str:
     # Format messages for LLM prompt
     messages_text = "\n".join([f"- {text}" for text in message_texts.values()])
     
-    # Create prompt for daily life context extraction
+    # Detect message language by sampling first few messages
+    has_chinese = any('\u4e00' <= char <= '\u9fff' for char in sample_messages[0] if sample_messages else "")
+    detected_language = "Chinese" if has_chinese else "English"
+    
+    # Create prompt for daily life context extraction with STRONG language enforcement
     prompt = f"""You are an intelligent context-extraction assistant.  
             Analyze the following user messages and extract the key daily-life context, background and experiential stories of the user.
 
+            CRITICAL LANGUAGE REQUIREMENT:
+            - The user messages below are written in {detected_language}
+            - You MUST write your entire response ONLY in {detected_language}
+            - If messages are in English, respond in English
+            - If messages are in Chinese, respond in Chinese
+            - Do NOT switch languages under any circumstances
+            
             Focus on extracting:  
             - Daily routines and activities  
             - Stories and experiences the user shares  
@@ -152,11 +163,11 @@ def process_user_context(user_id: str, model_tag: str = 'e5') -> str:
 
             Please output a **structured**, **detailed** summary of the user's daily-life context in **clearly-labelled bullet points** grouped by category.  
             Constraints:  
-            • Produce the summary in the same language as the user messages.
+            • Output MUST be in {detected_language} (same language as the user messages above)
             • Only include items supported by the messages; avoid speculation.  
             • Use relative timestamps if available (e.g., "recently", "over past month").  
             • Do **not** include extra commentary or reflection or labelling.
-            Output only the summary.
+            Output only the summary in {detected_language}.
 
             """
 
@@ -171,7 +182,7 @@ def process_user_context(user_id: str, model_tag: str = 'e5') -> str:
         
         # #region agent log
         with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"location":"context_extractor.py:process_user_context:before_llm","message":"Before LLM call","data":{"user_id":user_id,"prompt_length":len(prompt),"prompt_preview":prompt[:300]},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3A"}, ensure_ascii=False) + '\n')
+            f.write(json.dumps({"location":"context_extractor.py:process_user_context:before_llm","message":"Before LLM call","data":{"user_id":user_id,"detected_language":detected_language,"prompt_length":len(prompt),"prompt_preview":prompt[:300]},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3A"}, ensure_ascii=False) + '\n')
         # #endregion
         
         context_summary = client.chat(messages_for_llm)

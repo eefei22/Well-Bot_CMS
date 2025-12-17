@@ -135,9 +135,20 @@ def extract_user_facts(user_id: str, model_tag: str = 'e5') -> str:
     # Format messages for LLM prompt
     messages_text = "\n".join([f"- {text}" for text in message_texts.values()])
     
-    # Create prompt for persona facts extraction
+    # Detect message language by sampling first few messages
+    has_chinese_facts = any('\u4e00' <= char <= '\u9fff' for char in sample_messages_facts[0] if sample_messages_facts else "")
+    detected_language_facts = "Chinese" if has_chinese_facts else "English"
+    
+    # Create prompt for persona facts extraction with STRONG language enforcement
     prompt = f"""You are an intelligent user-profiling assistant.  
             Analyze the following user messages and extract their stable persona characteristics and factual context.
+
+            CRITICAL LANGUAGE REQUIREMENT:
+            - The user messages below are written in {detected_language_facts}
+            - You MUST write your entire response ONLY in {detected_language_facts}
+            - If messages are in English, respond in English
+            - If messages are in Chinese, respond in Chinese
+            - Do NOT switch languages under any circumstances
 
             Focus on these categories:  
             - Communication style and patterns  
@@ -152,11 +163,11 @@ def extract_user_facts(user_id: str, model_tag: str = 'e5') -> str:
 
             Please output a **structured**, **detailed** summary of the user's facts in clearly-labelled bullet points by category.  
             Important constraints:  
-            • Produce the facts in the same language as the user messages.
+            • Output MUST be in {detected_language_facts} (same language as the user messages above)
             • Only include items you can reasonably infer.  
             • Do **not** include additional justification or long explanations.  
 
-            Output only the summary.
+            Output only the summary in {detected_language_facts}.
             """
 
     # Initialize LLM client with longer timeout for reasoning model
@@ -170,7 +181,7 @@ def extract_user_facts(user_id: str, model_tag: str = 'e5') -> str:
         
         # #region agent log
         with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
-            f.write(json.dumps({"location":"facts_extractor.py:extract_user_facts:before_llm","message":"Before LLM call for facts","data":{"user_id":user_id,"prompt_length":len(prompt),"prompt_preview":prompt[:300]},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3A"}, ensure_ascii=False) + '\n')
+            f.write(json.dumps({"location":"facts_extractor.py:extract_user_facts:before_llm","message":"Before LLM call for facts","data":{"user_id":user_id,"detected_language":detected_language_facts,"prompt_length":len(prompt),"prompt_preview":prompt[:300]},"timestamp":__import__('datetime').datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H3A"}, ensure_ascii=False) + '\n')
         # #endregion
         
         facts_summary = client.chat(messages_for_llm)
