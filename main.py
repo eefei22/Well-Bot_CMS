@@ -74,12 +74,6 @@ async def process_user_context(request: schemas.ProcessContextRequest):
     logger.info(f"Timestamp: {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     logger.info("=" * 60)
     
-    # #region agent log
-    import json
-    with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
-        f.write(json.dumps({"location":"main.py:process_user_context:entry","message":"API endpoint called","data":{"request_user_id":request.user_id,"conversation_id":request.conversation_id},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H2A"}) + '\n')
-    # #endregion
-    
     # Determine the actual user_id to use
     # If conversation_id is provided, fetch user_id from conversation (source of truth)
     # Otherwise, use the provided user_id
@@ -89,11 +83,6 @@ async def process_user_context(request: schemas.ProcessContextRequest):
             actual_user_id = database.get_conversation_user_id(request.conversation_id)
             logger.info("")
             logger.info(f"[Validation] Conversation {request.conversation_id} belongs to user {actual_user_id}")
-            
-            # #region agent log
-            with open(r'c:\Users\lowee\Desktop\Well-Bot_Cloud-Edge\.cursor\debug.log', 'a', encoding='utf-8') as f:
-                f.write(json.dumps({"location":"main.py:process_user_context:after_validation","message":"User ID validated","data":{"request_user_id":request.user_id,"actual_user_id":actual_user_id,"matched":actual_user_id == request.user_id},"timestamp":datetime.now().timestamp()*1000,"sessionId":"debug-session","hypothesisId":"H2A,H2B,H2C"}) + '\n')
-            # #endregion
             
             if actual_user_id != request.user_id:
                 logger.warning(
