@@ -136,8 +136,22 @@ def process_user_context(user_id: str, model_tag: str = 'e5') -> str:
     messages_text = "\n".join([f"- {text}" for text in message_texts.values()])
     
     # Detect message language by sampling first few messages
-    has_chinese = any('\u4e00' <= char <= '\u9fff' for char in sample_messages[0] if sample_messages else "")
-    detected_language = "Chinese" if has_chinese else "English"
+    # Check for Chinese characters
+    sample_text = " ".join(sample_messages[:3]) if len(sample_messages) >= 3 else (sample_messages[0] if sample_messages else "")
+    has_chinese = any('\u4e00' <= char <= '\u9fff' for char in sample_text)
+    
+    # Check for common Malay words (case insensitive)
+    malay_indicators = ['yang', 'saya', 'adalah', 'untuk', 'dengan', 'tidak', 'ini', 'itu', 'ada', 'pada', 'mereka', 'akan']
+    sample_lower = sample_text.lower()
+    malay_word_count = sum(1 for word in malay_indicators if f' {word} ' in f' {sample_lower} ' or sample_lower.startswith(f'{word} ') or sample_lower.endswith(f' {word}'))
+    
+    # Determine language
+    if has_chinese:
+        detected_language = "Chinese"
+    elif malay_word_count >= 2:  # If at least 2 Malay indicators found
+        detected_language = "Malay"
+    else:
+        detected_language = "English"
     
     # Create prompt for daily life context extraction with STRONG language enforcement
     prompt = f"""You are an intelligent context-extraction assistant.  
@@ -148,6 +162,7 @@ def process_user_context(user_id: str, model_tag: str = 'e5') -> str:
             - You MUST write your entire response ONLY in {detected_language}
             - If messages are in English, respond in English
             - If messages are in Chinese, respond in Chinese
+            - If messages are in Malay (Bahasa Melayu), respond in Malay
             - Do NOT switch languages under any circumstances
             
             Focus on extracting:  
