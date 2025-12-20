@@ -10,6 +10,7 @@ from typing import List, Dict, Optional
 from datetime import datetime
 import logging
 import os
+import httpx
 
 from utils import activity_logger
 from utils import database
@@ -55,8 +56,8 @@ async def dashboard():
         
         .container {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            grid-template-rows: 1fr 1fr;
+            grid-template-columns: 1fr 1fr 1fr;
+            grid-template-rows: 1fr;
             gap: 20px;
             height: calc(100vh - 140px);
         }
@@ -86,9 +87,8 @@ async def dashboard():
             font-size: 1.2em;
         }
         
-        .fusion-column h2 { color: #ff6b6b; }
-        .intervention-column h2 { color: #4ecdc4; }
-        .context-column h2 { color: #ffe66d; }
+        .model-services-column h2 { color: #ff6b6b; }
+        .fusion-intervention-column h2 { color: #4ecdc4; }
         .status-column h2 { color: #95e1d3; }
         
         .activity-list {
@@ -253,31 +253,23 @@ async def dashboard():
     <h1>Well-Bot Cloud Services Dashboard</h1>
     
     <div class="container">
-        <!-- Top Left: Fusion Activity -->
-        <div class="column fusion-column">
-            <h2>Fusion Activity</h2>
-            <ul class="activity-list" id="fusionList">
+        <!-- Left Column: Model Services Status -->
+        <div class="column model-services-column">
+            <h2>Model Services Status</h2>
+            <ul class="activity-list" id="modelServicesList">
                 <li class="empty-message">Loading...</li>
             </ul>
         </div>
-        
-        <!-- Top Right: Intervention Activity -->
-        <div class="column intervention-column">
-            <h2>Intervention Activity</h2>
-            <ul class="activity-list" id="interventionList">
+
+        <!-- Middle Column: Fusion & Intervention Activity -->
+        <div class="column fusion-intervention-column">
+            <h2>Fusion & Intervention Activity</h2>
+            <ul class="activity-list" id="fusionInterventionList">
                 <li class="empty-message">Loading...</li>
             </ul>
         </div>
-        
-        <!-- Bottom Left: Context Generation Activity -->
-        <div class="column context-column">
-            <h2>Context Generation Activity</h2>
-            <ul class="activity-list" id="contextList">
-                <li class="empty-message">Loading...</li>
-            </ul>
-        </div>
-        
-        <!-- Bottom Right: Service Status -->
+
+        <!-- Right Column: Service Status -->
         <div class="column status-column">
             <h2>Service Status</h2>
             <div id="serviceStatus">
@@ -315,9 +307,8 @@ async def dashboard():
     </div>
     
     <script>
-        let fusionHistory = [];
-        let interventionHistory = [];
-        let contextHistory = [];
+        let modelServicesHistory = [];
+        let fusionInterventionHistory = [];
         const MAX_DISPLAY = 50;
         
         function formatTimestamp(timestamp) {
@@ -331,240 +322,309 @@ async def dashboard():
             return `${seconds.toFixed(2)}s`;
         }
         
-        function updateFusion(fusionActivities) {
-            const list = document.getElementById('fusionList');
-            
-            if (fusionActivities && fusionActivities.length > 0) {
-                fusionActivities.forEach(activity => {
-                    const exists = fusionHistory.find(a => 
-                        a.timestamp === activity.timestamp && 
-                        a.user_id === activity.user_id
-                    );
-                    if (!exists) {
-                        fusionHistory.unshift(activity);
-                    }
-                });
-                
-                if (fusionHistory.length > MAX_DISPLAY) {
-                    fusionHistory = fusionHistory.slice(0, MAX_DISPLAY);
-                }
-            }
-            
-            if (fusionHistory.length === 0) {
-                list.innerHTML = '<li class="empty-message">No fusion activity yet</li>';
+        function updateModelServices(modelServicesData) {
+            const list = document.getElementById('modelServicesList');
+
+            if (!modelServicesData) {
+                list.innerHTML = '<li class="empty-message">No model services data available</li>';
                 return;
             }
-            
-            list.innerHTML = fusionHistory.map(activity => {
-                const statusClass = activity.status === 'success' ? 'success' : 
-                                   activity.status === 'no_signals' ? 'no_signals' : 'error';
-                const statusBadge = activity.status === 'success' ? 'success' :
-                                   activity.status === 'no_signals' ? 'no_signals' : 'error';
-                
-                return `
-                    <li class="activity-item ${statusClass}">
-                        <div class="item-header">
-                            <span>User: ${activity.user_id.substring(0, 8)}...</span>
-                            <span class="status-badge status-${statusBadge}">${activity.status.toUpperCase()}</span>
-                        </div>
-                        <div class="item-detail timestamp">${formatTimestamp(activity.timestamp)}</div>
-                        ${activity.emotion_label ? `
-                            <div class="item-detail-row">
-                                <div class="item-detail">
-                                    <span class="emotion">${activity.emotion_label}</span>
-                                    <span class="confidence">(${((activity.confidence_score || 0) * 100).toFixed(1)}%)</span>
-                                </div>
-                            </div>
-                        ` : ''}
-                        ${activity.model_signals ? `
-                            <div class="item-detail-row">
-                                <div class="item-detail" style="font-size: 0.85em;">
-                                    Signals Received: SER(${activity.model_signals.ser || 0}) FER(${activity.model_signals.fer || 0}) Vitals(${activity.model_signals.vitals || 0})
-                                </div>
-                                <div class="item-detail" style="font-size: 0.85em;">
-                                    Duration: ${formatDuration(activity.duration_seconds)}
-                                </div>
-                            </div>
-                        ` : ''}
-                        ${activity.model_signals_detail ? `
-                            <div class="item-detail" style="font-size: 0.8em; margin-top: 5px; color: #888;">
-                                ${activity.model_signals_detail.ser && activity.model_signals_detail.ser.length > 0 ? `
-                                    SER: ${activity.model_signals_detail.ser.map(s => `${s.emotion_label}(${(s.confidence * 100).toFixed(0)}%)`).join(', ')}
-                                ` : ''}
-                                ${activity.model_signals_detail.fer && activity.model_signals_detail.fer.length > 0 ? `
-                                    FER: ${activity.model_signals_detail.fer.map(s => `${s.emotion_label}(${(s.confidence * 100).toFixed(0)}%)`).join(', ')}
-                                ` : ''}
-                                ${activity.model_signals_detail.vitals && activity.model_signals_detail.vitals.length > 0 ? `
-                                    Vitals: ${activity.model_signals_detail.vitals.map(s => `${s.emotion_label}(${(s.confidence * 100).toFixed(0)}%)`).join(', ')}
-                                ` : ''}
-                            </div>
-                        ` : ''}
-                        ${activity.fusion_calculation_log ? `
-                            <div class="item-detail" style="font-size: 0.8em; margin-top: 5px; color: #aaa; font-style: italic;">
-                                Calculation: ${activity.fusion_calculation_log}
-                            </div>
-                        ` : ''}
-                        ${activity.db_write_success !== undefined ? `
-                            <div class="item-detail" style="font-size: 0.8em; margin-top: 3px;">
-                                Database: <span style="color: ${activity.db_write_success ? '#4ecdc4' : '#ff6b6b'}">${activity.db_write_success ? '✓ Written' : '✗ Failed'}</span>
-                            </div>
-                        ` : ''}
-                        ${activity.error ? `
-                            <div class="item-detail" style="color: #ff6b6b; font-size: 0.85em;">
-                                Error: ${activity.error}
-                            </div>
-                        ` : ''}
-                    </li>
-                `;
-            }).join('');
-        }
-        
-        function updateIntervention(interventionActivities) {
-            const list = document.getElementById('interventionList');
-            
-            if (interventionActivities && interventionActivities.length > 0) {
-                interventionActivities.forEach(activity => {
-                    const exists = interventionHistory.find(a => 
-                        a.timestamp === activity.timestamp && 
-                        a.user_id === activity.user_id
-                    );
-                    if (!exists) {
-                        interventionHistory.unshift(activity);
-                    }
-                });
-                
-                if (interventionHistory.length > MAX_DISPLAY) {
-                    interventionHistory = interventionHistory.slice(0, MAX_DISPLAY);
+
+            const services = [
+                {
+                    name: 'Vitals',
+                    url: 'https://well-bot-bvs-emotion-520080168829.asia-south1.run.app',
+                    key: 'vitals',
+                    color: '#ff6b6b'
+                },
+                {
+                    name: 'FER',
+                    url: 'https://wellbot-fer-backend-520080168829.asia-southeast1.run.app',
+                    key: 'fer',
+                    color: '#4ecdc4'
+                },
+                {
+                    name: 'SER',
+                    url: 'https://well-bot-emotionrecognition-520080168829.asia-south1.run.app',
+                    key: 'ser',
+                    color: '#ffe66d'
                 }
-            }
-            
-            if (interventionHistory.length === 0) {
-                list.innerHTML = '<li class="empty-message">No intervention activity yet</li>';
-                return;
-            }
-            
-            list.innerHTML = interventionHistory.map(activity => {
-                const statusClass = activity.status === 'success' ? 'success' : 'error';
-                const decision = activity.decision || {};
-                const emotion = activity.emotion || {};
-                
-                return `
-                    <li class="activity-item ${statusClass}">
+            ];
+
+            list.innerHTML = services.map(service => {
+                const serviceData = modelServicesData[service.key] || {};
+                const isHealthy = serviceData.status === 'healthy' || serviceData.status === 'active';
+                const lastActivity = serviceData.last_activity || {};
+                const recentCount = serviceData.recent_signals || 0;
+
+                            // Special handling for SER service with detailed status
+                        if (service.key === 'ser') {
+                            const queueSize = serviceData.queue_size || 0;
+                            const currentProcessing = serviceData.current_processing;
+                            const lastSuccessfulResult = serviceData.last_successful_result;
+
+                            return `
+                    <li class="activity-item ${isHealthy ? 'success' : 'error'}">
                         <div class="item-header">
-                            <span>User: ${activity.user_id.substring(0, 8)}...</span>
-                            <span class="status-badge status-${statusClass}">${activity.status.toUpperCase()}</span>
+                            <span style="color: ${service.color}">${service.name}</span>
+                            <span class="status-badge status-${isHealthy ? 'success' : 'error'}">${isHealthy ? 'HEALTHY' : 'ERROR'}</span>
                         </div>
-                        <div class="item-detail timestamp">${formatTimestamp(activity.timestamp)}</div>
-                        ${emotion.label ? `
-                            <div class="item-detail-row">
-                                <div class="item-detail">
-                                    <span class="emotion">${emotion.label}</span>
-                                    <span class="confidence">(${((emotion.confidence || 0) * 100).toFixed(1)}%)</span>
-                                </div>
-                            </div>
-                        ` : ''}
-                        ${decision.trigger_intervention !== undefined ? `
-                            <div class="item-detail-row">
-                                <div class="item-detail" style="font-size: 0.85em;">
-                                    Trigger: ${decision.trigger_intervention ? 'YES' : 'NO'} 
-                                    (Confidence: ${((decision.confidence || 0) * 100).toFixed(1)}%)
-                                </div>
-                            </div>
-                        ` : ''}
-                        ${activity.ranked_activities && activity.ranked_activities.length > 0 ? `
-                            <div class="item-detail" style="font-size: 0.85em; margin-top: 5px;">
-                                Activities: ${activity.ranked_activities.map(a => `${a.rank}.${a.activity_type}`).join(', ')}
-                            </div>
-                        ` : ''}
-                        ${activity.fusion ? `
-                            <div class="item-detail" style="font-size: 0.85em; color: #888;">
-                                Fusion: ${activity.fusion.called ? 'Called' : 'Skipped'} 
-                                ${activity.fusion.status ? `(${activity.fusion.status})` : ''}
-                            </div>
-                        ` : ''}
-                        ${activity.error ? `
-                            <div class="item-detail" style="color: #ff6b6b; font-size: 0.85em;">
-                                Error: ${activity.error}
-                            </div>
-                        ` : ''}
-                    </li>
-                `;
-            }).join('');
-        }
-        
-        function updateContext(contextActivities) {
-            const list = document.getElementById('contextList');
-            
-            if (contextActivities && contextActivities.length > 0) {
-                contextActivities.forEach(activity => {
-                    const exists = contextHistory.find(a => 
-                        a.timestamp === activity.timestamp && 
-                        a.user_id === activity.user_id
-                    );
-                    if (!exists) {
-                        contextHistory.unshift(activity);
-                    }
-                });
-                
-                if (contextHistory.length > MAX_DISPLAY) {
-                    contextHistory = contextHistory.slice(0, MAX_DISPLAY);
-                }
-            }
-            
-            if (contextHistory.length === 0) {
-                list.innerHTML = '<li class="empty-message">No context generation activity yet</li>';
-                return;
-            }
-            
-            list.innerHTML = contextHistory.map(activity => {
-                const statusClass = activity.status === 'success' ? 'success' : 
-                                   activity.status === 'partial_success' ? 'partial_success' : 'error';
-                const results = activity.results || {};
-                const durations = activity.durations || {};
-                
-                return `
-                    <li class="activity-item ${statusClass}">
-                        <div class="item-header">
-                            <span>User: ${activity.user_id.substring(0, 8)}...</span>
-                            <span class="status-badge status-${statusClass === 'partial_success' ? 'partial' : statusClass}">${activity.status.toUpperCase().replace('_', ' ')}</span>
+                        <div class="item-detail" style="font-size: 0.85em; color: #888;">
+                            ${service.url}
                         </div>
-                        <div class="item-detail timestamp">${formatTimestamp(activity.timestamp)}</div>
-                        ${activity.conversation_id ? `
-                            <div class="item-detail" style="font-size: 0.85em; color: #888;">
-                                Conversation: ${activity.conversation_id.substring(activity.conversation_id.length - 8)}
-                            </div>
-                        ` : ''}
                         <div class="item-detail-row">
                             <div class="item-detail" style="font-size: 0.85em;">
-                                Facts: ${results.facts_extracted ? '✓' : '✗'} 
-                                ${results.facts_length ? `(${results.facts_length.toLocaleString()} chars)` : ''}
+                                Queue Size: ${queueSize}
                             </div>
                             <div class="item-detail" style="font-size: 0.85em;">
-                                Context: ${results.context_extracted ? '✓' : '✗'} 
-                                ${results.context_length ? `(${results.context_length.toLocaleString()} chars)` : ''}
+                                Recent Signals: ${recentCount}
                             </div>
                         </div>
-                        ${activity.embedding ? `
-                            <div class="item-detail-row">
-                                <div class="item-detail" style="font-size: 0.85em; color: #888;">
-                                    Messages: ${activity.embedding.messages_processed || 0} | 
-                                    Chunks: ${activity.embedding.chunks_created || 0}
-                                </div>
-                            </div>
-                        ` : ''}
-                        ${durations.total ? `
+                        ${lastActivity.timestamp ? `
                             <div class="item-detail-row">
                                 <div class="item-detail" style="font-size: 0.85em;">
-                                    Duration: ${formatDuration(durations.total)}
-                                    ${durations.embedding ? ` (Embed: ${formatDuration(durations.embedding)})` : ''}
-                                    ${durations.facts ? ` (Facts: ${formatDuration(durations.facts)})` : ''}
-                                    ${durations.context ? ` (Context: ${formatDuration(durations.context)})` : ''}
+                                    Last Request: ${formatTimestamp(lastActivity.timestamp)}
+                                </div>
+                                <div class="item-detail" style="font-size: 0.85em;">
+                                    User: ${lastActivity.user_id ? lastActivity.user_id.substring(0, 8) + '...' : 'Unknown'}
                                 </div>
                             </div>
                         ` : ''}
-                        ${activity.error ? `
+                        ${currentProcessing ? `
+                            <div class="item-detail" style="font-size: 0.85em; color: #ffe66d;">
+                                Processing: ${currentProcessing.filename || 'No filename available'}
+                            </div>
+                            <div class="item-detail" style="font-size: 0.85em; color: #ffe66d;">
+                                Started: ${formatTimestamp(currentProcessing.started_at)} (User: ${currentProcessing.user_id ? currentProcessing.user_id.substring(0, 8) + '...' : 'Unknown'})
+                            </div>
+                        ` : ''}
+                        ${lastSuccessfulResult ? `
+                            <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
+                                Last Result: ${lastSuccessfulResult.emotion || 'N/A'} (${(lastSuccessfulResult.emotion_confidence * 100).toFixed(1)}%)
+                            </div>
+                            ${lastSuccessfulResult.sentiment ? `
+                                <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
+                                    Sentiment: ${lastSuccessfulResult.sentiment}
+                                </div>
+                            ` : ''}
+                            ${lastSuccessfulResult.transcript ? `
+                                <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
+                                    Transcript: "${lastSuccessfulResult.transcript.length > 30 ? lastSuccessfulResult.transcript.substring(0, 30) + '...' : lastSuccessfulResult.transcript}"
+                                </div>
+                            ` : ''}
+                            <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
+                                Database write: ${lastSuccessfulResult.db_write_success ? 'processed (aggregation pending)' : 'failed'}
+                            </div>
+                        ` : ''}
+                        ${serviceData.error ? `
                             <div class="item-detail" style="color: #ff6b6b; font-size: 0.85em;">
-                                Error: ${activity.error}
+                                Error: ${serviceData.error}
+                            </div>
+                        ` : ''}
+                    </li>
+                `;
+                        } else {
+                            // Default display for FER and Vitals
+                            return `
+                    <li class="activity-item ${isHealthy ? 'success' : 'error'}">
+                        <div class="item-header">
+                            <span style="color: ${service.color}">${service.name}</span>
+                            <span class="status-badge status-${isHealthy ? 'success' : 'error'}">${isHealthy ? 'HEALTHY' : 'ERROR'}</span>
+                        </div>
+                        <div class="item-detail" style="font-size: 0.85em; color: #888;">
+                            ${service.url}
+                        </div>
+                        ${lastActivity.timestamp ? `
+                            <div class="item-detail-row">
+                                <div class="item-detail" style="font-size: 0.85em;">
+                                    Last Activity: ${formatTimestamp(lastActivity.timestamp)}
+                                </div>
+                                <div class="item-detail" style="font-size: 0.85em;">
+                                    Recent Signals: ${recentCount}
+                                </div>
+                            </div>
+                        ` : ''}
+                        ${lastActivity.user_id ? `
+                            <div class="item-detail" style="font-size: 0.85em; color: #aaa;">
+                                Last User: ${lastActivity.user_id.substring(0, 8)}...
+                            </div>
+                        ` : ''}
+                        ${serviceData.error ? `
+                            <div class="item-detail" style="color: #ff6b6b; font-size: 0.85em;">
+                                Error: ${serviceData.error}
+                            </div>
+                        ` : ''}
+                    </li>
+                `;
+                        }
+            }).join('');
+        }
+        
+        function updateFusionIntervention(activities) {
+            const list = document.getElementById('fusionInterventionList');
+
+            // Combine fusion and intervention activities, pairing by user_id and timestamp
+            const combinedActivities = [];
+
+            // Create a map of fusion activities by user_id + timestamp
+            const fusionMap = new Map();
+            if (activities.fusion && activities.fusion.length > 0) {
+                activities.fusion.forEach(activity => {
+                    const key = `${activity.user_id}_${activity.timestamp}`;
+                    fusionMap.set(key, activity);
+                });
+            }
+
+            // Process intervention activities and pair with fusion when available
+            if (activities.intervention && activities.intervention.length > 0) {
+                activities.intervention.forEach(intervention => {
+                    const key = `${intervention.user_id}_${intervention.timestamp}`;
+                    const fusion = fusionMap.get(key);
+
+                    combinedActivities.push({
+                        user_id: intervention.user_id,
+                        timestamp: intervention.timestamp,
+                        fusion: fusion,
+                        intervention: intervention
+                    });
+
+                    // Remove from fusion map so we don't process unpaired fusions
+                    if (fusion) {
+                        fusionMap.delete(key);
+                    }
+                });
+            }
+
+            // Add remaining unpaired fusion activities
+            fusionMap.forEach((fusion, key) => {
+                combinedActivities.push({
+                    user_id: fusion.user_id,
+                    timestamp: fusion.timestamp,
+                    fusion: fusion,
+                    intervention: null
+                });
+            });
+
+            // Sort by timestamp (newest first)
+            combinedActivities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+            if (combinedActivities.length > 0) {
+                combinedActivities.forEach(activity => {
+                    const exists = fusionInterventionHistory.find(a =>
+                        a.timestamp === activity.timestamp &&
+                        a.user_id === activity.user_id
+                    );
+                    if (!exists) {
+                        fusionInterventionHistory.unshift(activity);
+                    }
+                });
+
+                if (fusionInterventionHistory.length > MAX_DISPLAY) {
+                    fusionInterventionHistory = fusionInterventionHistory.slice(0, MAX_DISPLAY);
+                }
+            }
+
+            if (fusionInterventionHistory.length === 0) {
+                list.innerHTML = '<li class="empty-message">No fusion or intervention activity yet</li>';
+                return;
+            }
+
+            list.innerHTML = fusionInterventionHistory.map(activity => {
+                const fusion = activity.fusion;
+                const intervention = activity.intervention;
+
+                // Determine overall status
+                let overallStatus = 'UNKNOWN';
+                let statusClass = 'error';
+
+                if (fusion && intervention) {
+                    // Both activities present
+                    if (fusion.status === 'success' && intervention.status === 'success') {
+                        overallStatus = 'SUCCESS';
+                        statusClass = 'success';
+                    } else if (fusion.status === 'success' || intervention.status === 'success') {
+                        overallStatus = 'PARTIAL';
+                        statusClass = 'partial_success';
+                    } else {
+                        overallStatus = 'FAILED';
+                        statusClass = 'error';
+                    }
+                } else if (fusion) {
+                    overallStatus = fusion.status === 'success' ? 'SUCCESS' : 'FAILED';
+                    statusClass = fusion.status === 'success' ? 'success' : 'error';
+                } else if (intervention) {
+                    overallStatus = intervention.status === 'success' ? 'SUCCESS' : 'FAILED';
+                    statusClass = intervention.status === 'success' ? 'success' : 'error';
+                }
+
+                return `
+                    <li class="activity-item ${statusClass}">
+                        <div class="item-header">
+                            <span>User: ${activity.user_id.substring(0, 8)}...</span>
+                            <span class="status-badge status-${statusClass === 'partial_success' ? 'partial' : statusClass}">[${overallStatus}]</span>
+                        </div>
+
+                        ${fusion ? `
+                            <div style="border-left: 3px solid #ff6b6b; padding-left: 10px; margin: 8px 0;">
+                                <div style="font-weight: bold; color: #ff6b6b; margin-bottom: 4px;">FUSION RESULT: ${fusion.emotion_label || 'N/A'} (${fusion.confidence_score ? (fusion.confidence_score * 100).toFixed(1) : '0.0'}%)</div>
+                                <div class="item-detail timestamp">${formatTimestamp(fusion.timestamp)}</div>
+                                ---
+                                ${fusion.model_signals ? `
+                                    <div class="item-detail" style="font-size: 0.85em; margin-top: 4px;">
+                                        Signals Received: SER(${fusion.model_signals.ser || 0}) FER(${fusion.model_signals.fer || 0}) Vitals(${fusion.model_signals.vitals || 0})
+                                    </div>
+                                ` : ''}
+                                ${fusion.model_signals_detail ? `
+                                    <div class="item-detail" style="font-size: 0.8em; margin-top: 4px; color: #888;">
+                                        ${fusion.model_signals_detail.ser && fusion.model_signals_detail.ser.length > 0 ? `
+                                            SER: ${fusion.model_signals_detail.ser.map(s => `${s.emotion_label}(${(s.confidence * 100).toFixed(0)}%)`).join(', ')}
+                                        ` : ''}
+                                        ${fusion.model_signals_detail.fer && fusion.model_signals_detail.fer.length > 0 ? `
+                                            FER: ${fusion.model_signals_detail.fer.map(s => `${s.emotion_label}(${(s.confidence * 100).toFixed(0)}%)`).join(', ')}
+                                        ` : ''}
+                                        ${fusion.model_signals_detail.vitals && fusion.model_signals_detail.vitals.length > 0 ? `
+                                            Vitals: ${fusion.model_signals_detail.vitals.map(s => `${s.emotion_label}(${(s.confidence * 100).toFixed(0)}%)`).join(', ')}
+                                        ` : ''}
+                                    </div>
+                                ` : ''}
+                                ${fusion.fusion_calculation_log ? `
+                                    <div class="item-detail" style="font-size: 0.8em; margin-top: 4px; color: #aaa; font-style: italic;">
+                                        Calculation: ${fusion.fusion_calculation_log}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : ''}
+
+                        ${intervention ? `
+                            <div style="border-left: 3px solid #4ecdc4; padding-left: 10px; margin: 8px 0;">
+                                <div style="font-weight: bold; color: #4ecdc4; margin-bottom: 4px;">INTERVENTION</div>
+                                ${intervention.decision ? `
+                                    <div class="item-detail" style="font-size: 0.85em;">
+                                        TRIGGER: ${intervention.decision.trigger_intervention ? 'YES' : 'NO'}
+                                        (Confidence: ${((intervention.decision.confidence || 0) * 100).toFixed(1)}%)
+                                    </div>
+                                ` : ''}
+                                ${intervention.ranked_activities && intervention.ranked_activities.length > 0 ? `
+                                    <div class="item-detail" style="font-size: 0.85em; margin-top: 4px;">
+                                        Activities: ${intervention.ranked_activities.map(a => `${a.rank}.${a.activity_type}`).join(', ')}
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : ''}
+
+                        ${fusion && fusion.db_write_success !== undefined ? `
+                            <div class="item-detail" style="font-size: 0.85em; margin-top: 8px;">
+                                Database: ${fusion.db_write_success ? '✓ Written' : '✗ Failed'}
+                            </div>
+                        ` : intervention && intervention.db_write_success !== undefined ? `
+                            <div class="item-detail" style="font-size: 0.85em; margin-top: 8px;">
+                                Database: ${intervention.db_write_success ? '✓ Written' : '✗ Failed'}
+                            </div>
+                        ` : ''}
+
+                        ${(fusion && fusion.error) || (intervention && intervention.error) ? `
+                            <div class="item-detail" style="color: #ff6b6b; font-size: 0.85em; margin-top: 4px;">
+                                Error: ${fusion.error || intervention.error}
                             </div>
                         ` : ''}
                     </li>
@@ -591,7 +651,7 @@ async def dashboard():
             html += `<div>Fusion: <span style="color: ${services.fusion === 'healthy' ? '#4ecdc4' : '#ff6b6b'}">${services.fusion || 'unknown'}</span></div>`;
             html += `<div>Intervention: <span style="color: ${services.intervention === 'healthy' ? '#4ecdc4' : '#ff6b6b'}">${services.intervention || 'unknown'}</span></div>`;
             html += `<div>Context: <span style="color: ${services.context === 'healthy' ? '#4ecdc4' : '#ff6b6b'}">${services.context || 'unknown'}</span></div>`;
-            html += `<div>Database: <span style="color: ${services.database === 'connected' ? '#4ecdc4' : '#ff6b6b'}">${services.database || 'unknown'}</span></div>`;
+            html += `<div>Database: <span style="color: #888;">Not monitored by dashboard</span></div>`;
             html += '</div>';
             
             // Model service URLs
@@ -624,24 +684,26 @@ async def dashboard():
                 `health-indicator ${services.intervention === 'healthy' ? 'health-healthy' : 'health-unhealthy'}`;
             document.getElementById('contextHealth').className = 
                 `health-indicator ${services.context === 'healthy' ? 'health-healthy' : 'health-unhealthy'}`;
-            document.getElementById('dbHealth').className = 
-                `health-indicator ${services.database === 'connected' ? 'health-healthy' : 'health-unhealthy'}`;
+            // Database health not monitored by this dashboard
+            document.getElementById('dbHealth').className = 'health-indicator health-healthy';
         }
         
         async function fetchDashboardData() {
             try {
                 const response = await fetch('/api/dashboard/status');
                 const data = await response.json();
-                
-                updateFusion(data.fusion || []);
-                updateIntervention(data.intervention || []);
-                updateContext(data.context || []);
+
+                updateModelServices(data.model_services || {});
+                updateFusionIntervention({
+                    fusion: data.fusion || [],
+                    intervention: data.intervention || []
+                });
                 updateServiceStatus(data.status || {});
-                
+
                 document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
                 document.getElementById('statusIndicator').className = 'status-indicator status-online';
                 document.getElementById('statusText').textContent = 'Connected';
-                
+
             } catch (error) {
                 console.error('Error fetching dashboard data:', error);
                 document.getElementById('statusIndicator').className = 'status-indicator status-offline';
@@ -659,6 +721,47 @@ async def dashboard():
 </html>
     """
     return HTMLResponse(content=html_content)
+
+
+async def check_model_service_health(url: str, service_name: str) -> Dict:
+    """Check health of a model service via HTTP."""
+    try:
+        timeout = httpx.Timeout(5.0)  # 5 second timeout
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            health_url = f"{url}/health" if not url.endswith("/health") else url
+            response = await client.get(health_url)
+            if response.status_code == 200:
+                try:
+                    data = response.json()
+                    return {
+                        "status": "healthy",
+                        "response": data,
+                        "error": None
+                    }
+                except:
+                    return {
+                        "status": "healthy",  # Service responded but not with JSON
+                        "response": None,
+                        "error": None
+                    }
+            else:
+                return {
+                    "status": "unhealthy",
+                    "response": None,
+                    "error": f"HTTP {response.status_code}"
+                }
+    except httpx.TimeoutException:
+        return {
+            "status": "unhealthy",
+            "response": None,
+            "error": "Timeout"
+        }
+    except Exception as e:
+        return {
+            "status": "unhealthy",
+            "response": None,
+            "error": str(e)
+        }
 
 
 @router.get("/status")
@@ -681,13 +784,8 @@ async def get_dashboard_status():
         
         # Get service health status
         services = {}
-        try:
-            # Check database
-            client = database.get_supabase_client()
-            client.table("users").select("id").limit(1).execute()
-            services["database"] = "connected"
-        except Exception:
-            services["database"] = "disconnected"
+        # Database status is not monitored by this cloud service dashboard
+        services["database"] = "not_monitored"
         
         # Check fusion service (assume healthy if we can read logs)
         services["fusion"] = "healthy"
@@ -698,18 +796,144 @@ async def get_dashboard_status():
         # Check context service
         services["context"] = "healthy"
         
-        # Get model service URLs from fusion config
-        model_services = {}
+        # Get model service status with monitoring data
+        model_services_data = {}
         try:
-            fusion_config = load_fusion_config()
-            model_urls = fusion_config.get("model_service_urls", {})
-            model_services = {
-                "ser": model_urls.get("ser", "N/A"),
-                "fer": model_urls.get("fer", "N/A"),
-                "vitals": model_urls.get("vitals", "N/A")
+            # Define model services with their URLs
+            model_services_config = {
+                "vitals": {
+                    "url": "https://well-bot-bvs-emotion-520080168829.asia-south1.run.app",
+                    "status": "unknown",
+                    "last_activity": {},
+                    "recent_signals": 0,
+                    "error": None
+                },
+                "fer": {
+                    "url": "https://wellbot-fer-backend-520080168829.asia-southeast1.run.app",
+                    "status": "unknown",
+                    "last_activity": {},
+                    "recent_signals": 0,
+                    "error": None
+                },
+                "ser": {
+                    "url": "https://well-bot-emotionrecognition-520080168829.asia-south1.run.app",
+                    "status": "unknown",
+                    "last_activity": {},
+                    "recent_signals": 0,
+                    "error": None
+                }
             }
-        except Exception:
-            pass
+
+            # Check SER service status and get detailed activity data
+            try:
+                # Query SER service status endpoint for real-time data
+                ser_status_url = f"{model_services_config['ser']['url']}/ser/status"
+
+                try:
+                    # Get detailed status from SER service
+                    timeout = httpx.Timeout(5.0)
+                    async with httpx.AsyncClient(timeout=timeout) as client:
+                        response = await client.get(ser_status_url)
+
+                        if response.status_code == 200:
+                            ser_data = response.json()
+                            model_services_config["ser"]["status"] = ser_data.get("status", "unknown")
+                            model_services_config["ser"]["queue_size"] = ser_data.get("queue_size", 0)
+
+                            # Get recent requests
+                            recent_requests = ser_data.get("recent_requests", [])
+                            if recent_requests:
+                                model_services_config["ser"]["recent_signals"] = len(recent_requests)
+                                # Get the most recent request
+                                latest_request = recent_requests[0]  # Already sorted newest first
+                                model_services_config["ser"]["last_activity"] = {
+                                    "timestamp": latest_request.get("timestamp"),
+                                    "user_id": latest_request.get("user_id"),
+                                    "type": "request_received"
+                                }
+                            else:
+                                model_services_config["ser"]["recent_signals"] = 0
+
+                            # Get current processing info
+                            current_processing = ser_data.get("current_processing")
+                            if current_processing:
+                                model_services_config["ser"]["current_processing"] = {
+                                    "user_id": current_processing.get("user_id"),
+                                    "started_at": current_processing.get("started_at"),
+                                    "filename": current_processing.get("filename"),
+                                    "status": "processing"
+                                }
+
+                            # Get recent results with all fields
+                            recent_results = ser_data.get("recent_results", [])
+                            if recent_results:
+                                # Get the most recent result
+                                latest_result = recent_results[0]
+                                model_services_config["ser"]["last_successful_result"] = {
+                                    "timestamp": latest_result.get("timestamp"),
+                                    "user_id": latest_result.get("user_id"),
+                                    "filename": latest_result.get("filename"),
+                                    "emotion": latest_result.get("emotion"),
+                                    "emotion_confidence": latest_result.get("emotion_confidence"),
+                                    "sentiment": latest_result.get("sentiment"),
+                                    "transcript": latest_result.get("transcript"),
+                                    "language": latest_result.get("language"),
+                                    "db_write_success": latest_result.get("db_write_success"),
+                                    "aggregation_pending": latest_result.get("aggregation_pending", True)
+                                }
+
+                        else:
+                            # Fallback to basic health check
+                            model_services_config["ser"]["status"] = "unhealthy"
+                            model_services_config["ser"]["error"] = f"HTTP {response.status_code}"
+
+                except httpx.TimeoutException:
+                    model_services_config["ser"]["status"] = "unhealthy"
+                    model_services_config["ser"]["error"] = "Timeout"
+                except Exception as api_e:
+                    logger.debug(f"Could not query SER status API: {api_e}")
+                    # Fallback to basic health check
+                    ser_health = await check_model_service_health(
+                        model_services_config["ser"]["url"], "SER"
+                    )
+                    model_services_config["ser"]["status"] = ser_health["status"]
+                    if ser_health["error"]:
+                        model_services_config["ser"]["error"] = ser_health["error"]
+
+            except Exception as e:
+                model_services_config["ser"]["error"] = str(e)
+                model_services_config["ser"]["status"] = "error"
+
+            # Check FER service health
+            try:
+                fer_health = await check_model_service_health(
+                    model_services_config["fer"]["url"], "FER"
+                )
+                model_services_config["fer"]["status"] = fer_health["status"]
+                if fer_health["error"]:
+                    model_services_config["fer"]["error"] = fer_health["error"]
+
+            except Exception as e:
+                model_services_config["fer"]["error"] = str(e)
+                model_services_config["fer"]["status"] = "error"
+
+            # Check Vitals service health
+            try:
+                vitals_health = await check_model_service_health(
+                    model_services_config["vitals"]["url"], "Vitals"
+                )
+                model_services_config["vitals"]["status"] = vitals_health["status"]
+                if vitals_health["error"]:
+                    model_services_config["vitals"]["error"] = vitals_health["error"]
+
+            except Exception as e:
+                model_services_config["vitals"]["error"] = str(e)
+                model_services_config["vitals"]["status"] = "error"
+
+            model_services_data = model_services_config
+
+        except Exception as e:
+            logger.warning(f"Error getting model services data: {e}")
         
         # Calculate recent stats (last hour)
         now = datetime.now()
@@ -735,10 +959,10 @@ async def get_dashboard_status():
         return {
             "fusion": fusion_activities[:50],
             "intervention": intervention_activities[:50],
-            "context": context_activities[:50],
+            "model_services": model_services_data,
             "status": {
                 "services": services,
-                "model_services": model_services,
+                "model_services": {},  # Legacy format - keeping empty for backward compatibility
                 "stats": {
                     "fusion_last_hour": fusion_last_hour,
                     "intervention_last_hour": intervention_last_hour,
@@ -752,7 +976,7 @@ async def get_dashboard_status():
         return {
             "fusion": [],
             "intervention": [],
-            "context": [],
+            "model_services": {},
             "status": {
                 "services": {},
                 "model_services": {},
