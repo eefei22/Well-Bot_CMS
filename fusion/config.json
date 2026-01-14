@@ -6,5 +6,9 @@
   },
   "time_window_seconds": 60,
   "intervention_window_minutes": 15,
-  "model_timeout_seconds": 1.5
+  "model_timeout_seconds": 1.5,
+  "negative_emotion_boost": {
+    "enabled": true,
+    "boost_strength": 0.4
+  }
 }
