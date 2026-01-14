@@ -109,7 +109,8 @@ def test_decision_engine(emotion_label="Sad", confidence_score=0.85, time_since_
         trigger, confidence, reasoning = decide_trigger_intervention(
             emotion_label=emotion_label,
             confidence_score=confidence_score,
-            time_since_last_activity_minutes=time_since_last
+            time_since_last_activity_minutes=time_since_last,
+            emotion_timestamp=database.get_current_time_utc8()
         )
         
         print(f"\n✓ Decision computed:")
@@ -122,6 +123,69 @@ def test_decision_engine(emotion_label="Sad", confidence_score=0.85, time_since_
         
     except Exception as e:
         print(f"\n✗ TEST 2 FAILED: {e}")
+        import traceback
+        traceback.print_exc()
+        return None, None, None
+
+
+def test_decision_engine_from_db():
+    """Test 2b: Decision engine using latest data from database"""
+    print("=" * 80)
+    print("TEST 2B: DECISION ENGINE (DB INPUTS)")
+    print("=" * 80)
+
+    try:
+        print("\nFetching latest emotion log...")
+        latest_emotion = database.get_latest_emotion_log(DEV_USER_ID)
+        if not latest_emotion:
+            print("ERROR: No emotion logs found for this user")
+            return None, None, None
+
+        emotion_label = latest_emotion.get("emotion_label")
+        confidence_score = latest_emotion.get("confidence_score")
+        emotion_timestamp_str = latest_emotion.get("timestamp")
+
+        print(
+            f"Latest emotion: {emotion_label} "
+            f"(confidence: {confidence_score:.2f})"
+        )
+        print(f"Emotion timestamp (raw): {emotion_timestamp_str}")
+
+        emotion_timestamp = None
+        if not emotion_timestamp_str:
+            print("WARNING: Emotion timestamp missing; decision should block")
+        else:
+            try:
+                emotion_timestamp = database.parse_database_timestamp(emotion_timestamp_str)
+                print(f"Emotion timestamp (parsed UTC+8): {emotion_timestamp.isoformat()}")
+            except Exception as e:
+                print(f"WARNING: Failed to parse emotion timestamp: {e}")
+
+        print("\nFetching time since last activity...")
+        time_since_last_activity = database.get_time_since_last_activity(DEV_USER_ID)
+        if time_since_last_activity == float("inf"):
+            print("No previous activities found (infinite time)")
+        else:
+            print(f"Time since last activity: {time_since_last_activity:.2f} minutes")
+
+        print("\nRunning decision engine...")
+        trigger, confidence, reasoning = decide_trigger_intervention(
+            emotion_label=emotion_label,
+            confidence_score=confidence_score,
+            time_since_last_activity_minutes=time_since_last_activity,
+            emotion_timestamp=emotion_timestamp
+        )
+
+        print("\nDecision result:")
+        print(f"  - Trigger intervention: {trigger}")
+        print(f"  - Decision confidence: {confidence:.3f}")
+        print(f"  - Reasoning: {reasoning}")
+
+        print("\nOK: TEST 2B PASSED\n")
+        return trigger, confidence, reasoning
+
+    except Exception as e:
+        print(f"\nERROR: TEST 2B FAILED: {e}")
         import traceback
         traceback.print_exc()
         return None, None, None
@@ -344,7 +408,8 @@ def test_decision_engine_cases():
             actual_trigger, actual_confidence, reasoning = decide_trigger_intervention(
                 emotion_label=case["emotion_label"],
                 confidence_score=case["confidence_score"],
-                time_since_last_activity_minutes=case["time_since_last_activity"]
+                time_since_last_activity_minutes=case["time_since_last_activity"],
+                emotion_timestamp=database.get_current_time_utc8()
             )
             
             # Check if results match expected
@@ -456,6 +521,9 @@ def main():
         confidence_score=0.85,
         time_since_last=time_since if time_since != float('inf') else 120.0
     )
+
+    # Test 2b: Decision engine with latest DB inputs
+    test_decision_engine_from_db()
     
     # Test 3: Suggestion engine
     # Get activity counts from database for testing

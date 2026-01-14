@@ -18,6 +18,7 @@ import uuid
 
 from utils import database
 from utils import activity_logger
+from utils.database import get_malaysia_timezone
 from intervention.decision_engine import decide_trigger_intervention
 from intervention.suggestion_engine import suggest_activities
 from intervention.models import (
@@ -191,7 +192,7 @@ async def process_suggestion_request(request: SuggestionRequest) -> SuggestionRe
     """
     logger.info(f"Processing suggestion request for user {request.user_id}")
     
-    intervention_start_time = datetime.now()
+    intervention_start_time = datetime.now(get_malaysia_timezone())
     fusion_called = False
     fusion_status = None
     
@@ -223,7 +224,7 @@ async def process_suggestion_request(request: SuggestionRequest) -> SuggestionRe
         confidence_score = latest_emotion.get('confidence_score')
         emotion_timestamp_str = latest_emotion.get('timestamp')
         
-        if not emotion_label or confidence_score is None or not emotion_timestamp_str:
+        if not emotion_label or confidence_score is None:
             raise ValueError(f"Invalid emotion log data for user {request.user_id}: missing required fields")
         
         # Validate emotion_label
@@ -231,10 +232,23 @@ async def process_suggestion_request(request: SuggestionRequest) -> SuggestionRe
             raise ValueError(f"Invalid emotion_label: '{emotion_label}'. Must be one of: {', '.join(VALID_EMOTION_LABELS)}")
         
         # Parse timestamp string to datetime if needed (database stores in UTC+8)
-        if isinstance(emotion_timestamp_str, str):
-            emotion_timestamp = database.parse_database_timestamp(emotion_timestamp_str)
+        emotion_timestamp = None
+        if not emotion_timestamp_str:
+            logger.warning(
+                f"Latest emotion log missing timestamp for user {request.user_id}; "
+                "blocking intervention decision"
+            )
         else:
-            emotion_timestamp = emotion_timestamp_str
+            try:
+                if isinstance(emotion_timestamp_str, str):
+                    emotion_timestamp = database.parse_database_timestamp(emotion_timestamp_str)
+                else:
+                    emotion_timestamp = emotion_timestamp_str
+            except Exception as e:
+                logger.warning(
+                    f"Failed to parse emotion timestamp for user {request.user_id}: {e}; "
+                    "blocking intervention decision"
+                )
         
         logger.info(f"Using latest emotion from database: {emotion_label} (confidence: {confidence_score:.2f})")
         
@@ -253,7 +267,8 @@ async def process_suggestion_request(request: SuggestionRequest) -> SuggestionRe
         trigger_intervention, decision_confidence, decision_reasoning = decide_trigger_intervention(
             emotion_label=emotion_label,
             confidence_score=confidence_score,
-            time_since_last_activity_minutes=time_since_last_activity
+            time_since_last_activity_minutes=time_since_last_activity,
+            emotion_timestamp=emotion_timestamp
         )
         
         decision_result = DecisionResult(
@@ -333,4 +348,3 @@ async def process_suggestion_request(request: SuggestionRequest) -> SuggestionRe
             duration_seconds=intervention_duration
         )
         raise
-

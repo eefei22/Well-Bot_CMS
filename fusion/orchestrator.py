@@ -95,8 +95,8 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
         # Get timeout override if provided
         timeout_override = request.options.timeout_seconds if request.options else None
         
-        # Track start time for duration
-        fusion_start_time = datetime.now()
+        # Track start time for duration (Malaysia timezone)
+        fusion_start_time = datetime.now(database.get_malaysia_timezone())
         
         # Step 2: Calculate effective time window for querying signals
         # Get last Fusion timestamp (last emotion_log entry for this user)
