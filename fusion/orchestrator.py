@@ -256,7 +256,7 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
         # Step 4: Check minimum signals requirement
         if not filtered_signals:
             logger.warning("No valid signals found within time window")
-            fusion_duration = (datetime.now() - fusion_start_time).total_seconds()
+            fusion_duration = (datetime.now(database.get_malaysia_timezone()) - fusion_start_time).total_seconds()
             activity_logger.log_fusion_activity(
                 user_id=request.user_id,
                 timestamp=snapshot_timestamp,
@@ -283,7 +283,7 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
         except ValueError as e:
             logger.error(f"Fusion calculation failed: {e}")
             fusion_calculation_log += f" | Error: {str(e)}"
-            fusion_duration = (datetime.now() - fusion_start_time).total_seconds()
+            fusion_duration = (datetime.now(database.get_malaysia_timezone()) - fusion_start_time).total_seconds()
             activity_logger.log_fusion_activity(
                 user_id=request.user_id,
                 timestamp=snapshot_timestamp,
@@ -319,7 +319,7 @@ async def process_emotion_snapshot(request: EmotionSnapshotRequest) -> Union[Fus
             db_write_success = True
         
         # Step 7: Log activity
-        fusion_duration = (datetime.now() - fusion_start_time).total_seconds()
+        fusion_duration = (datetime.now(database.get_malaysia_timezone()) - fusion_start_time).total_seconds()
         activity_logger.log_fusion_activity(
             user_id=request.user_id,
             timestamp=snapshot_timestamp,
