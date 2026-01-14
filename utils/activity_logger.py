@@ -11,6 +11,12 @@ from collections import deque
 from datetime import datetime
 from typing import Dict, Optional, Any
 
+# Import get_malaysia_timezone - use lazy import to avoid circular dependencies
+def _get_malaysia_timezone():
+    """Lazy import to avoid circular dependencies."""
+    from utils.database import get_malaysia_timezone
+    return get_malaysia_timezone()
+
 logger = logging.getLogger(__name__)
 
 # Maximum number of entries to keep in memory per service (auto-cleanup via deque maxlen)
@@ -86,7 +92,7 @@ def log_fusion_activity(
     """
     log_entry = {
         "timestamp": timestamp.isoformat(),
-        "logged_at": datetime.now().isoformat(),
+        "logged_at": datetime.now(_get_malaysia_timezone()).isoformat(),
         "user_id": user_id,
         "status": status,
         "emotion_label": emotion_label,
@@ -154,7 +160,7 @@ def log_intervention_activity(
     """
     log_entry = {
         "timestamp": timestamp.isoformat(),
-        "logged_at": datetime.now().isoformat(),
+        "logged_at": datetime.now(_get_malaysia_timezone()).isoformat(),
         "user_id": user_id,
         "status": status,
         "decision": {
@@ -222,7 +228,7 @@ def log_context_activity(
     """
     log_entry = {
         "timestamp": timestamp.isoformat(),
-        "logged_at": datetime.now().isoformat(),
+        "logged_at": datetime.now(_get_malaysia_timezone()).isoformat(),
         "user_id": user_id,
         "conversation_id": conversation_id,
         "status": status,

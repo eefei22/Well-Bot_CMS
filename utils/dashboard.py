@@ -15,6 +15,7 @@ import httpx
 from utils import activity_logger
 from utils import database
 from fusion.config_loader import load_config as load_fusion_config
+from utils.database import get_malaysia_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -936,8 +937,8 @@ async def get_dashboard_status():
             logger.warning(f"Error getting model services data: {e}")
         
         # Calculate recent stats (last hour)
-        now = datetime.now()
-        one_hour_ago = datetime.fromtimestamp(now.timestamp() - 3600)
+        now = datetime.now(get_malaysia_timezone())
+        one_hour_ago = datetime.fromtimestamp(now.timestamp() - 3600, tz=now.tzinfo)
         
         def count_recent(activities):
             count = 0

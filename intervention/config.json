@@ -2,7 +2,8 @@
   "decision_engine": {
     "negative_emotions": ["Sad", "Angry", "Fear"],
     "confidence_threshold": 0.70,
-    "min_time_since_last_activity_minutes": 60.0
+    "min_time_since_last_activity_minutes": 60.0,
+    "max_emotion_age_minutes": 15.0
   },
   "suggestion_engine": {
     "frequency_multipliers": {

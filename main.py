@@ -15,6 +15,7 @@ from utils import dashboard as dashboard_module
 from context_generator import context_extractor, facts_extractor, message_preprocessor, title_generator
 from intervention import intervention
 from fusion import api as fusion_api
+from utils.database import get_malaysia_timezone
 
 # Setup logging with timestamps
 logging.basicConfig(
@@ -351,7 +352,7 @@ async def intervention_health():
             "status": "healthy",
             "service": "intervention",
             "database": "connected",
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(get_malaysia_timezone()).isoformat()
         }
     except Exception as e:
         logger.error(f"Health check failed: {e}")
@@ -360,7 +361,7 @@ async def intervention_health():
             "service": "intervention",
             "database": "disconnected",
             "error": str(e),
-            "timestamp": datetime.now().isoformat()
+            "timestamp": datetime.now(get_malaysia_timezone()).isoformat()
         }
 
 
