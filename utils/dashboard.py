@@ -456,11 +456,9 @@ async def dashboard():
                             <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
                                 Last Result: ${lastSuccessfulResult.emotion || 'N/A'} (${(lastSuccessfulResult.emotion_confidence * 100).toFixed(1)}%)
                             </div>
-                            ${lastSuccessfulResult.filename ? `
-                                <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
-                                    File: ${lastSuccessfulResult.filename}
-                                </div>
-                            ` : ''}
+                            <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
+                                Aggregation: ${lastSuccessfulResult.aggregation_complete ? 'complete' : 'pending'}
+                            </div>
                             <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
                                 Database write: ${lastSuccessfulResult.db_write_success ? '✓ Written' : '✗ Failed'}
                             </div>
@@ -990,10 +988,10 @@ async def get_dashboard_status():
                                 model_services_config["fer"]["last_successful_result"] = {
                                     "timestamp": latest_result.get("timestamp"),
                                     "user_id": latest_result.get("user_id"),
-                                    "filename": latest_result.get("filename"),
                                     "emotion": latest_result.get("emotion"),
                                     "emotion_confidence": latest_result.get("emotion_confidence"),
-                                    "db_write_success": latest_result.get("db_write_success")
+                                    "db_write_success": latest_result.get("db_write_success"),
+                                    "aggregation_complete": latest_result.get("aggregation_complete", False)
                                 }
 
                         else:
