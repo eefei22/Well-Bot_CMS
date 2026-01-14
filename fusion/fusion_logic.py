@@ -6,7 +6,7 @@ emotion predictions from multiple modalities.
 """
 
 import logging
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from collections import defaultdict
 
 from fusion.config_loader import load_config
@@ -23,8 +23,16 @@ FUSION_WEIGHTS = {
     "vitals": _fusion_config.get("vitals", 0.3)
 }
 
+# Negative emotion boost configuration
+_boost_config = _config.get("negative_emotion_boost", {})
+NEGATIVE_EMOTION_BOOST_ENABLED = _boost_config.get("enabled", True)
+NEGATIVE_EMOTION_BOOST_STRENGTH = _boost_config.get("boost_strength", 0.4)
+
 # Valid emotion labels
 VALID_EMOTIONS = ["Angry", "Sad", "Happy", "Fear"]
+
+# Negative emotions (critical emotions that require attention)
+NEGATIVE_EMOTIONS = ["Angry", "Sad", "Fear"]
 
 
 def calculate_mood_score(emotion_confidences: Dict[str, float]) -> int:
@@ -86,6 +94,109 @@ def calculate_mood_score(emotion_confidences: Dict[str, float]) -> int:
     )
     
     return mood_score
+
+
+def calculate_negative_emotion_consensus(
+    modality_scores: Dict[str, Dict[str, float]],
+    weights: Dict[str, float]
+) -> Tuple[float, int]:
+    """
+    Calculate negative emotion consensus score and frequency.
+    
+    This detects when multiple modalities show negative emotions (even if different ones).
+    The idea is that mixed negative emotions (Sad, Angry, Fear) across modalities
+    indicate a critical emotional state that should boost confidence, not reduce it.
+    
+    Args:
+        modality_scores: Dictionary mapping modality -> emotion -> avg_confidence
+        weights: Dictionary mapping modality -> weight
+    
+    Returns:
+        Tuple of (consensus_score: float, negative_modality_count: int)
+        - consensus_score: Weighted sum of negative emotion confidences across all modalities (0.0-1.0)
+        - negative_modality_count: Number of modalities showing negative emotions
+    """
+    negative_consensus = 0.0
+    negative_modality_count = 0
+    
+    for modality, emotion_scores in modality_scores.items():
+        modality_weight = weights.get(modality, 0.0)
+        if modality_weight == 0.0:
+            continue
+        
+        # Check if this modality has any negative emotions
+        modality_negative_sum = 0.0
+        for emotion, confidence in emotion_scores.items():
+            if emotion in NEGATIVE_EMOTIONS:
+                modality_negative_sum += confidence
+        
+        if modality_negative_sum > 0.0:
+            negative_modality_count += 1
+            # Weight the negative emotion contribution by modality weight
+            negative_consensus += modality_negative_sum * modality_weight
+    
+    return negative_consensus, negative_modality_count
+
+
+def apply_negative_emotion_boost(
+    confidence_score: float,
+    emotion_label: str,
+    negative_consensus: float,
+    negative_modality_count: int,
+    total_modalities: int
+) -> float:
+    """
+    Apply confidence boost when negative emotions are detected across multiple modalities.
+    
+    The boost increases confidence when:
+    1. The selected emotion is negative
+    2. Multiple modalities show negative emotions (consensus)
+    3. The negative consensus score is high
+    
+    This ensures that mixed negative emotions (e.g., SER=Sad, FER=Angry, Vitals=Fear)
+    are treated as a critical pattern that increases confidence, not decreases it.
+    
+    Args:
+        confidence_score: Base confidence score (0.0-1.0)
+        emotion_label: Selected emotion label
+        negative_consensus: Weighted sum of negative emotion confidences
+        negative_modality_count: Number of modalities showing negative emotions
+        total_modalities: Total number of contributing modalities
+    
+    Returns:
+        Boosted confidence score (0.0-1.0)
+    """
+    # Only boost if the selected emotion is negative
+    if emotion_label not in NEGATIVE_EMOTIONS:
+        return confidence_score
+    
+    # Calculate boost factor based on negative emotion frequency/consensus
+    # More modalities showing negative emotions = higher boost
+    if total_modalities == 0:
+        return confidence_score
+    
+    # Frequency factor: how many modalities show negative emotions
+    frequency_factor = negative_modality_count / total_modalities
+    
+    # Consensus factor: how strong the negative emotions are
+    consensus_factor = min(negative_consensus, 1.0)
+    
+    # Boost multiplier: increases with both frequency and consensus
+    # Formula: 1.0 + (frequency_factor * consensus_factor * boost_strength)
+    # boost_strength controls how much we boost (0.0 = no boost, 1.0 = max boost)
+    boost_multiplier = 1.0 + (frequency_factor * consensus_factor * NEGATIVE_EMOTION_BOOST_STRENGTH)
+    
+    # Apply boost
+    boosted_confidence = min(confidence_score * boost_multiplier, 1.0)
+    
+    logger.info(
+        f"Negative emotion boost applied: base={confidence_score:.3f}, "
+        f"frequency={frequency_factor:.2f} ({negative_modality_count}/{total_modalities}), "
+        f"consensus={consensus_factor:.3f}, multiplier={boost_multiplier:.3f}, "
+        f"boosted={boosted_confidence:.3f}"
+    )
+    
+    return boosted_confidence
 
 
 def fuse_signals(signals: List[ModelSignal], weights: Optional[Dict[str, float]] = None) -> Dict:
@@ -183,6 +294,23 @@ def fuse_signals(signals: List[ModelSignal], weights: Optional[Dict[str, float]]
         confidence_score = min(raw_score / contributing_weights_sum, 1.0)
     else:
         confidence_score = 0.0
+    
+    # Step 6.5: Apply negative emotion boost if applicable
+    # This boosts confidence when multiple modalities detect negative emotions
+    # (even if different negative emotions), treating it as a critical pattern
+    if NEGATIVE_EMOTION_BOOST_ENABLED:
+        negative_consensus, negative_modality_count = calculate_negative_emotion_consensus(
+            modality_scores, weights
+        )
+        total_modalities = len(modality_scores)
+        
+        confidence_score = apply_negative_emotion_boost(
+            confidence_score,
+            emotion_label,
+            negative_consensus,
+            negative_modality_count,
+            total_modalities
+        )
     
     # Step 7: Calculate emotional_score [0, 100] using balanced mood score
     # Normalize all emotion weighted scores to get confidences for mood calculation

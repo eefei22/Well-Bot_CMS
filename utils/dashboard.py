@@ -424,8 +424,56 @@ async def dashboard():
                         ` : ''}
                     </li>
                 `;
+                        } else if (service.key === 'fer') {
+                            // Special handling for FER service with detailed status
+                            const lastSuccessfulResult = serviceData.last_successful_result;
+
+                            return `
+                    <li class="activity-item ${isHealthy ? 'success' : 'error'}">
+                        <div class="item-header">
+                            <span style="color: ${service.color}">${service.name}</span>
+                            <span class="status-badge status-${isHealthy ? 'success' : 'error'}">${isHealthy ? 'HEALTHY' : 'ERROR'}</span>
+                        </div>
+                        <div class="item-detail" style="font-size: 0.85em; color: #888;">
+                            ${service.url}
+                        </div>
+                        <div class="item-detail-row">
+                            <div class="item-detail" style="font-size: 0.85em;">
+                                Recent Signals: ${recentCount}
+                            </div>
+                        </div>
+                        ${lastActivity.timestamp ? `
+                            <div class="item-detail-row">
+                                <div class="item-detail" style="font-size: 0.85em;">
+                                    Last Request: ${formatTimestamp(lastActivity.timestamp)}
+                                </div>
+                                <div class="item-detail" style="font-size: 0.85em;">
+                                    User: ${lastActivity.user_id ? lastActivity.user_id.substring(0, 8) + '...' : 'Unknown'}
+                                </div>
+                            </div>
+                        ` : ''}
+                        ${lastSuccessfulResult ? `
+                            <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
+                                Last Result: ${lastSuccessfulResult.emotion || 'N/A'} (${(lastSuccessfulResult.emotion_confidence * 100).toFixed(1)}%)
+                            </div>
+                            ${lastSuccessfulResult.filename ? `
+                                <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
+                                    File: ${lastSuccessfulResult.filename}
+                                </div>
+                            ` : ''}
+                            <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
+                                Database write: ${lastSuccessfulResult.db_write_success ? '✓ Written' : '✗ Failed'}
+                            </div>
+                        ` : ''}
+                        ${serviceData.error ? `
+                            <div class="item-detail" style="color: #ff6b6b; font-size: 0.85em;">
+                                Error: ${serviceData.error}
+                            </div>
+                        ` : ''}
+                    </li>
+                `;
                         } else {
-                            // Default display for FER and Vitals
+                            // Default display for Vitals
                             return `
                     <li class="activity-item ${isHealthy ? 'success' : 'error'}">
                         <div class="item-header">
@@ -905,14 +953,66 @@ async def get_dashboard_status():
                 model_services_config["ser"]["error"] = str(e)
                 model_services_config["ser"]["status"] = "error"
 
-            # Check FER service health
+            # Check FER service status and get detailed activity data
             try:
-                fer_health = await check_model_service_health(
-                    model_services_config["fer"]["url"], "FER"
-                )
-                model_services_config["fer"]["status"] = fer_health["status"]
-                if fer_health["error"]:
-                    model_services_config["fer"]["error"] = fer_health["error"]
+                # Query FER service status endpoint for real-time data
+                fer_status_url = f"{model_services_config['fer']['url']}/fer/status"
+
+                try:
+                    # Get detailed status from FER service
+                    timeout = httpx.Timeout(5.0)
+                    async with httpx.AsyncClient(timeout=timeout) as client:
+                        response = await client.get(fer_status_url)
+
+                        if response.status_code == 200:
+                            fer_data = response.json()
+                            model_services_config["fer"]["status"] = fer_data.get("status", "unknown")
+
+                            # Get recent requests
+                            recent_requests = fer_data.get("recent_requests", [])
+                            if recent_requests:
+                                model_services_config["fer"]["recent_signals"] = len(recent_requests)
+                                # Get the most recent request
+                                latest_request = recent_requests[0]  # Already sorted newest first
+                                model_services_config["fer"]["last_activity"] = {
+                                    "timestamp": latest_request.get("timestamp"),
+                                    "user_id": latest_request.get("user_id"),
+                                    "type": "request_received"
+                                }
+                            else:
+                                model_services_config["fer"]["recent_signals"] = 0
+
+                            # Get recent results with all fields
+                            recent_results = fer_data.get("recent_results", [])
+                            if recent_results:
+                                # Get the most recent result
+                                latest_result = recent_results[0]
+                                model_services_config["fer"]["last_successful_result"] = {
+                                    "timestamp": latest_result.get("timestamp"),
+                                    "user_id": latest_result.get("user_id"),
+                                    "filename": latest_result.get("filename"),
+                                    "emotion": latest_result.get("emotion"),
+                                    "emotion_confidence": latest_result.get("emotion_confidence"),
+                                    "db_write_success": latest_result.get("db_write_success")
+                                }
+
+                        else:
+                            # Fallback to basic health check
+                            model_services_config["fer"]["status"] = "unhealthy"
+                            model_services_config["fer"]["error"] = f"HTTP {response.status_code}"
+
+                except httpx.TimeoutException:
+                    model_services_config["fer"]["status"] = "unhealthy"
+                    model_services_config["fer"]["error"] = "Timeout"
+                except Exception as api_e:
+                    logger.debug(f"Could not query FER status API: {api_e}")
+                    # Fallback to basic health check
+                    fer_health = await check_model_service_health(
+                        model_services_config["fer"]["url"], "FER"
+                    )
+                    model_services_config["fer"]["status"] = fer_health["status"]
+                    if fer_health["error"]:
+                        model_services_config["fer"]["error"] = fer_health["error"]
 
             except Exception as e:
                 model_services_config["fer"]["error"] = str(e)
