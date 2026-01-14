@@ -308,7 +308,7 @@ async def process_suggestion_request(request: SuggestionRequest) -> SuggestionRe
         )
         
         # Log successful activity
-        intervention_duration = (datetime.now() - intervention_start_time).total_seconds()
+        intervention_duration = (datetime.now(get_malaysia_timezone()) - intervention_start_time).total_seconds()
         activity_logger.log_intervention_activity(
             user_id=request.user_id,
             timestamp=intervention_start_time,
@@ -337,7 +337,7 @@ async def process_suggestion_request(request: SuggestionRequest) -> SuggestionRe
     except Exception as e:
         logger.error(f"Error processing suggestion request for user {request.user_id}: {e}", exc_info=True)
         # Log error activity
-        intervention_duration = (datetime.now() - intervention_start_time).total_seconds()
+        intervention_duration = (datetime.now(get_malaysia_timezone()) - intervention_start_time).total_seconds()
         activity_logger.log_intervention_activity(
             user_id=request.user_id,
             timestamp=intervention_start_time,
