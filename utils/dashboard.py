@@ -456,11 +456,9 @@ async def dashboard():
                             <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
                                 Last Result: ${lastSuccessfulResult.emotion || 'N/A'} (${(lastSuccessfulResult.emotion_confidence * 100).toFixed(1)}%)
                             </div>
-                            ${lastSuccessfulResult.filename ? `
-                                <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
-                                    File: ${lastSuccessfulResult.filename}
-                                </div>
-                            ` : ''}
+                            <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
+                                Aggregation: ${lastSuccessfulResult.aggregation_complete ? 'complete' : 'pending'}
+                            </div>
                             <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
                                 Database write: ${lastSuccessfulResult.db_write_success ? '✓ Written' : '✗ Failed'}
                             </div>
@@ -472,8 +470,11 @@ async def dashboard():
                         ` : ''}
                     </li>
                 `;
-                        } else {
-                            // Default display for Vitals
+                        } else if (service.key === 'vitals') {
+                            // Special handling for BVS service with scheduled job status
+                            const lastJobRun = serviceData.last_job_run;
+                            const lastSuccessfulResult = serviceData.last_successful_result;
+
                             return `
                     <li class="activity-item ${isHealthy ? 'success' : 'error'}">
                         <div class="item-header">
@@ -483,21 +484,63 @@ async def dashboard():
                         <div class="item-detail" style="font-size: 0.85em; color: #888;">
                             ${service.url}
                         </div>
-                        ${lastActivity.timestamp ? `
+                        ${lastJobRun ? `
                             <div class="item-detail-row">
                                 <div class="item-detail" style="font-size: 0.85em;">
-                                    Last Activity: ${formatTimestamp(lastActivity.timestamp)}
+                                    Last Job Run: ${formatTimestamp(lastJobRun.started_at)}
                                 </div>
                                 <div class="item-detail" style="font-size: 0.85em;">
-                                    Recent Signals: ${recentCount}
+                                    Status: ${lastJobRun.status || 'unknown'}
                                 </div>
                             </div>
+                            <div class="item-detail-row">
+                                <div class="item-detail" style="font-size: 0.85em;">
+                                    Users Found: ${lastJobRun.users_found || 0}
+                                </div>
+                                <div class="item-detail" style="font-size: 0.85em;">
+                                    Processed: ${lastJobRun.users_processed || 0}
+                                </div>
+                                ${lastJobRun.users_failed > 0 ? `
+                                    <div class="item-detail" style="font-size: 0.85em; color: #ff6b6b;">
+                                        Failed: ${lastJobRun.users_failed}
+                                    </div>
+                                ` : ''}
+                            </div>
+                            ${lastJobRun.completed_at ? `
+                                <div class="item-detail" style="font-size: 0.85em; color: #888;">
+                                    Completed: ${formatTimestamp(lastJobRun.completed_at)}
+                                </div>
+                            ` : ''}
                         ` : ''}
-                        ${lastActivity.user_id ? `
-                            <div class="item-detail" style="font-size: 0.85em; color: #aaa;">
-                                Last User: ${lastActivity.user_id.substring(0, 8)}...
+                        ${lastSuccessfulResult ? `
+                            <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4; margin-top: 8px;">
+                                Last Result: ${lastSuccessfulResult.emotion || 'N/A'} (${(lastSuccessfulResult.emotion_confidence * 100).toFixed(1)}%)
+                            </div>
+                            <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
+                                Database write: ${lastSuccessfulResult.db_write_success ? '✓ Written' : '✗ Failed'}
+                            </div>
+                            <div class="item-detail" style="font-size: 0.85em; color: #4ecdc4;">
+                                Fitbit API: ${lastSuccessfulResult.fitbit_api_success ? '✓ Success' : '✗ Failed'}
                             </div>
                         ` : ''}
+                        ${serviceData.error ? `
+                            <div class="item-detail" style="color: #ff6b6b; font-size: 0.85em;">
+                                Error: ${serviceData.error}
+                            </div>
+                        ` : ''}
+                    </li>
+                `;
+                        } else {
+                            // Default display for other services (if any)
+                            return `
+                    <li class="activity-item ${isHealthy ? 'success' : 'error'}">
+                        <div class="item-header">
+                            <span style="color: ${service.color}">${service.name}</span>
+                            <span class="status-badge status-${isHealthy ? 'success' : 'error'}">${isHealthy ? 'HEALTHY' : 'ERROR'}</span>
+                        </div>
+                        <div class="item-detail" style="font-size: 0.85em; color: #888;">
+                            ${service.url}
+                        </div>
                         ${serviceData.error ? `
                             <div class="item-detail" style="color: #ff6b6b; font-size: 0.85em;">
                                 Error: ${serviceData.error}
@@ -990,10 +1033,10 @@ async def get_dashboard_status():
                                 model_services_config["fer"]["last_successful_result"] = {
                                     "timestamp": latest_result.get("timestamp"),
                                     "user_id": latest_result.get("user_id"),
-                                    "filename": latest_result.get("filename"),
                                     "emotion": latest_result.get("emotion"),
                                     "emotion_confidence": latest_result.get("emotion_confidence"),
-                                    "db_write_success": latest_result.get("db_write_success")
+                                    "db_write_success": latest_result.get("db_write_success"),
+                                    "aggregation_complete": latest_result.get("aggregation_complete", False)
                                 }
 
                         else:
@@ -1018,14 +1061,73 @@ async def get_dashboard_status():
                 model_services_config["fer"]["error"] = str(e)
                 model_services_config["fer"]["status"] = "error"
 
-            # Check Vitals service health
+            # Check BVS service status and get detailed activity data
             try:
-                vitals_health = await check_model_service_health(
-                    model_services_config["vitals"]["url"], "Vitals"
-                )
-                model_services_config["vitals"]["status"] = vitals_health["status"]
-                if vitals_health["error"]:
-                    model_services_config["vitals"]["error"] = vitals_health["error"]
+                # Query BVS service status endpoint for real-time data
+                bvs_status_url = f"{model_services_config['vitals']['url']}/bvs/status"
+
+                try:
+                    # Get detailed status from BVS service
+                    timeout = httpx.Timeout(5.0)
+                    async with httpx.AsyncClient(timeout=timeout) as client:
+                        response = await client.get(bvs_status_url)
+
+                        if response.status_code == 200:
+                            bvs_data = response.json()
+                            model_services_config["vitals"]["status"] = bvs_data.get("status", "unknown")
+
+                            # Get last job run info
+                            last_job_run = bvs_data.get("last_job_run")
+                            if last_job_run:
+                                model_services_config["vitals"]["last_job_run"] = {
+                                    "started_at": last_job_run.get("started_at"),
+                                    "completed_at": last_job_run.get("completed_at"),
+                                    "users_found": last_job_run.get("users_found", 0),
+                                    "users_processed": last_job_run.get("users_processed", 0),
+                                    "users_failed": last_job_run.get("users_failed", 0),
+                                    "status": last_job_run.get("status")
+                                }
+                                # Use job run info for recent signals count
+                                model_services_config["vitals"]["recent_signals"] = last_job_run.get("users_processed", 0)
+                                
+                                # Set last activity from job run
+                                if last_job_run.get("started_at"):
+                                    model_services_config["vitals"]["last_activity"] = {
+                                        "timestamp": last_job_run.get("started_at"),
+                                        "type": "scheduled_job_run"
+                                    }
+
+                            # Get recent user results
+                            recent_user_results = bvs_data.get("recent_user_results", [])
+                            if recent_user_results:
+                                # Get the most recent successful result
+                                latest_result = recent_user_results[0]
+                                model_services_config["vitals"]["last_successful_result"] = {
+                                    "timestamp": latest_result.get("timestamp"),
+                                    "user_id": latest_result.get("user_id"),
+                                    "emotion": latest_result.get("emotion"),
+                                    "emotion_confidence": latest_result.get("emotion_confidence"),
+                                    "db_write_success": latest_result.get("db_write_success"),
+                                    "fitbit_api_success": latest_result.get("fitbit_api_success")
+                                }
+
+                        else:
+                            # Fallback to basic health check
+                            model_services_config["vitals"]["status"] = "unhealthy"
+                            model_services_config["vitals"]["error"] = f"HTTP {response.status_code}"
+
+                except httpx.TimeoutException:
+                    model_services_config["vitals"]["status"] = "unhealthy"
+                    model_services_config["vitals"]["error"] = "Timeout"
+                except Exception as api_e:
+                    logger.debug(f"Could not query BVS status API: {api_e}")
+                    # Fallback to basic health check
+                    vitals_health = await check_model_service_health(
+                        model_services_config["vitals"]["url"], "Vitals"
+                    )
+                    model_services_config["vitals"]["status"] = vitals_health["status"]
+                    if vitals_health["error"]:
+                        model_services_config["vitals"]["error"] = vitals_health["error"]
 
             except Exception as e:
                 model_services_config["vitals"]["error"] = str(e)
